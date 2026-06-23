@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Security Logs — Wazuh Monitor{% endblock %}
+{% block page_title %}Security Logs{% endblock %}
+
+{% block content %}
+<!-- Page configuration config payload -->
+<div id="logsConfig" data-page-size="{{ page_size }}" class="hidden"></div>
+
+<div class="panel">
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+        <select class="filter-select" id="levelFilter">
+            <option value="">All Severity Levels</option>
+            <option value="15">Critical (Level 15+)</option>
+            <option value="12">High (Level 12+)</option>
+            <option value="7">Medium (Level 7+)</option>
+            <option value="4">Low (Level 4+)</option>
+        </select>
+        
+        <input type="text" class="filter-input" id="searchInput" placeholder="Search logs by description, rule, or agent...">
+        
+        <button class="refresh-btn" id="resetFiltersBtn" style="padding: 6px 14px;">
+            Reset Filters
+        </button>
+    </div>
+
+    <!-- Table -->
+    <div class="tbl-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 100px;">Level</th>
+                    <th style="width: 150px;">Agent</th>
+                    <th style="width: 120px;">Rule ID</th>
+                    <th>Description</th>
+                    <th style="width: 180px;">Timestamp</th>
+                </tr>
+            </thead>
+            <tbody id="logsTbody">
+                <!-- Dynamically populated by JS -->
+                <tr>
+                    <td colspan="5">
+                        <div class="empty-state">
+                            <div class="empty-icon">🔍</div>
+                            <div class="empty-text">Loading security events...</div>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination Footer -->
+    <div class="table-footer">
+        <span id="pageInfo">Showing 0-0 of 0 events</span>
+        <div class="page-btns">
+            <button class="page-btn" id="prevBtn" disabled>Previous</button>
+            <button class="page-btn" id="nextBtn" disabled>Next</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/logs.js"></script>
+{% endblock %}

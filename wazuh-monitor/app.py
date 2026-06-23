@@ -253,7 +253,8 @@ def api_alerts():
         search = request.args.get("search", None)
         sort = request.args.get("sort", None)
         tag = request.args.get("tag", None)
-        result = get_alerts(offset=offset, limit=limit, level=level,
+        agent = request.args.get("agent", None)
+        result = get_alerts(offset=offset, limit=limit, level=level, agent=agent,
                             search=search, sort=sort, tag=tag)
         return jsonify(result)
     except Exception as exc:

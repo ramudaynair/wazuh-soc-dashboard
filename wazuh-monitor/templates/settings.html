@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+
+{% block title %}Settings — Wazuh Monitor{% endblock %}
+{% block page_title %}Settings{% endblock %}
+
+{% block content %}
+<div class="panel padded">
+    
+    <!-- Wazuh API Configuration -->
+    <div class="settings-section">
+        <div class="settings-section-title">Wazuh API Connection</div>
+        <div class="settings-section-desc">Manage authentication and endpoints for the main Wazuh manager cluster.</div>
+        
+        <form id="settingsForm" class="settings-grid">
+            <div class="settings-field full-width">
+                <label class="settings-label" for="apiUrl">API URL</label>
+                <input type="url" id="apiUrl" class="settings-input" placeholder="https://127.0.0.1:55000" required>
+            </div>
+            <div class="settings-field">
+                <label class="settings-label" for="username">Username</label>
+                <input type="text" id="username" class="settings-input" placeholder="wazuh" required>
+            </div>
+            <div class="settings-field">
+                <label class="settings-label" for="password">Password</label>
+                <input type="password" id="password" class="settings-input" placeholder="••••••••">
+            </div>
+            <div class="settings-field full-width" style="flex-direction: row; align-items: center; gap: 8px;">
+                <input type="checkbox" id="verifySsl" style="cursor: pointer;">
+                <label class="settings-label" for="verifySsl" style="cursor: pointer; user-select: none;">Verify SSL Certificates (Disable for self-signed certificates)</label>
+            </div>
+            
+            <div class="settings-field full-width" style="margin-top: 10px;">
+                <div class="settings-actions">
+                    <button type="submit" class="btn-primary" id="saveBtn">Save Connection</button>
+                    <button type="button" class="btn-secondary" id="testBtn">Test Connection</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Dashboard Preferences -->
+    <div class="settings-section" style="margin-top: 40px; border-top: 1px solid var(--border); padding-top: 24px;">
+        <div class="settings-section-title">Dashboard Preferences</div>
+        <div class="settings-section-desc">Customize auto-refresh intervals and paginated table sizes.</div>
+        
+        <form id="preferencesForm" class="settings-grid">
+            <div class="settings-field">
+                <label class="settings-label" for="refreshInterval">Auto-Refresh Rate (seconds)</label>
+                <input type="number" id="refreshInterval" class="settings-input" min="5" max="3600" required>
+            </div>
+            <div class="settings-field">
+                <label class="settings-label" for="pageSize">Default Page Size</label>
+                <input type="number" id="pageSize" class="settings-input" min="5" max="100" required>
+            </div>
+            <div class="settings-field full-width" style="margin-top: 10px;">
+                <div class="settings-actions">
+                    <button type="submit" class="btn-primary" id="savePrefBtn">Save Preferences</button>
+                </div>
+            </div>
+        </form>
+    </div>
+
+    <!-- Manager Nodes -->
+    <div class="settings-section" style="margin-top: 40px; border-top: 1px solid var(--border); padding-top: 24px;">
+        <div class="settings-section-title">Cluster Manager Nodes</div>
+        <div class="settings-section-desc">Status of configured Wazuh Manager endpoints.</div>
+        <div class="manager-list" id="managerList">
+            <!-- Dynamically populated by JS -->
+            <div class="empty-state">
+                <div class="empty-icon">🖥</div>
+                <div class="empty-text">Loading managers info...</div>
+            </div>
+        </div>
+    </div>
+    
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/settings.js"></script>
+{% endblock %}

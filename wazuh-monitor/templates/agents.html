@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+
+{% block title %}Monitored Agents — Wazuh Monitor{% endblock %}
+{% block page_title %}Monitored Agents{% endblock %}
+
+{% block content %}
+<!-- Page configuration config payload -->
+<div id="agentsConfig" data-page-size="{{ page_size }}" class="hidden"></div>
+
+<div class="panel">
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+        <select class="filter-select" id="statusFilter">
+            <option value="">All Statuses</option>
+            <option value="active">Active</option>
+            <option value="disconnected">Disconnected</option>
+            <option value="pending">Pending</option>
+            <option value="never_connected">Never Connected</option>
+        </select>
+        
+        <input type="text" class="filter-input" id="searchInput" placeholder="Search agents by name or IP address...">
+        
+        <button class="refresh-btn" id="resetFiltersBtn" style="padding: 6px 14px;">
+            Reset Filters
+        </button>
+    </div>
+
+    <!-- Table -->
+    <div class="tbl-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 250px;">Agent Name</th>
+                    <th style="width: 150px;">IP Address</th>
+                    <th style="width: 150px;">Status</th>
+                    <th>OS / Platform</th>
+                    <th style="width: 200px;">Last Keep-Alive</th>
+                </tr>
+            </thead>
+            <tbody id="agentsTbody">
+                <!-- Dynamically populated by JS -->
+                <tr>
+                    <td colspan="5">
+                        <div class="empty-state">
+                            <div class="empty-icon">🖥</div>
+                            <div class="empty-text">Loading monitored endpoints...</div>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination Footer -->
+    <div class="table-footer">
+        <span id="pageInfo">Showing 0-0 of 0 agents</span>
+        <div class="page-btns">
+            <button class="page-btn" id="prevBtn" disabled>Previous</button>
+            <button class="page-btn" id="nextBtn" disabled>Next</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/agents.js"></script>
+{% endblock %}
