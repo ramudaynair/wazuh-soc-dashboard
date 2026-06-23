@@ -84,8 +84,13 @@ def init_auth_from_config():
         try:
             if auth.authenticate():
                 log.info("Auto-connected to Wazuh on startup")
+            else:
+                log.warning("Auto-connect failed: %s", auth.last_error)
         except Exception as exc:
-            log.warning("Auto-connect failed: %s", exc)
+            log.warning("Auto-connect failed with exception: %s", exc)
+    else:
+        log.warning("Auth NOT configured — missing fields in config.json under 'wazuh' block (api_url: %s, username: %s, password set: %s)",
+                    bool(api_url), bool(username), bool(password))
 
 
 # ── Page routes ─────────────────────────────────────────────────
