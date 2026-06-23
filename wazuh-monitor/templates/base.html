@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Wazuh Monitor — Custom SOC Dashboard for real-time endpoint security monitoring">
+    <title>{% block title %}Wazuh Monitor{% endblock %}</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <div class="app-layout">
+
+        <!-- ═══ SIDEBAR ═══ -->
+        <aside class="sidebar" id="sidebar">
+            <div class="sidebar-logo">
+                <div class="sidebar-logo-icon">🛡</div>
+                <span class="sidebar-logo-text">Wazuh Monitor</span>
+            </div>
+
+            <nav class="sidebar-nav">
+                <div class="sidebar-section-label">Navigation</div>
+
+                <a href="/" class="sidebar-link {{ 'active' if page == 'dashboard' }}">
+                    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="1" y="1" width="7" height="7" rx="1.5"/>
+                        <rect x="10" y="1" width="7" height="4" rx="1.5"/>
+                        <rect x="1" y="10" width="7" height="4" rx="1.5"/>
+                        <rect x="10" y="7" width="7" height="7" rx="1.5"/>
+                    </svg>
+                    <span class="sidebar-link-label">Dashboard</span>
+                </a>
+
+                <a href="/logs" class="sidebar-link {{ 'active' if page == 'logs' }}">
+                    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M3 4h12M3 7h10M3 10h12M3 13h8"/>
+                    </svg>
+                    <span class="sidebar-link-label">Logs</span>
+                </a>
+
+                <a href="/agents" class="sidebar-link {{ 'active' if page == 'agents' }}">
+                    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                        <rect x="2" y="3" width="14" height="10" rx="2"/>
+                        <line x1="6" y1="16" x2="12" y2="16"/>
+                        <line x1="9" y1="13" x2="9" y2="16"/>
+                    </svg>
+                    <span class="sidebar-link-label">Agents</span>
+                </a>
+
+                <div class="sidebar-section-label">Administration</div>
+
+                <a href="/settings" class="sidebar-link {{ 'active' if page == 'settings' }}">
+                    <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+                        <circle cx="9" cy="9" r="2.5"/>
+                        <path d="M9 1.5v2M9 14.5v2M1.5 9h2M14.5 9h2M3.1 3.1l1.4 1.4M13.5 13.5l1.4 1.4M3.1 14.9l1.4-1.4M13.5 4.5l1.4-1.4"/>
+                    </svg>
+                    <span class="sidebar-link-label">Settings</span>
+                </a>
+            </nav>
+
+            <div class="sidebar-footer">
+                <button class="sidebar-toggle" id="sidebarToggle" title="Toggle sidebar">
+                    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                        <polyline points="10,2 4,8 10,14"/>
+                    </svg>
+                </button>
+            </div>
+        </aside>
+
+        <!-- ═══ MAIN CONTENT ═══ -->
+        <div class="main-content">
+
+            <!-- Topbar -->
+            <header class="topbar">
+                <span class="topbar-title">{% block page_title %}Dashboard{% endblock %}</span>
+                <div class="topbar-right">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span class="status-label" id="statusLabel">Checking…</span>
+                    <div class="topbar-sep"></div>
+                    <span class="time-badge" id="clockDisplay"></span>
+                    <button class="refresh-btn" id="refreshBtn" onclick="if(typeof refreshPage==='function')refreshPage()">
+                        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M1 8a7 7 0 0 1 13-3.5M15 8a7 7 0 0 1-13 3.5"/>
+                            <polyline points="1,1 1,5 5,5"/>
+                            <polyline points="15,15 15,11 11,11"/>
+                        </svg>
+                        Refresh
+                    </button>
+                </div>
+            </header>
+
+            <!-- Page content -->
+            <main class="page-content">
+                {% block content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+
+    <!-- ═══ ALERT DETAIL DRAWER ═══ -->
+    <div class="drawer-overlay" id="drawerOverlay"></div>
+    <div class="drawer" id="drawer">
+        <div class="drawer-header">
+            <span class="drawer-title">Alert Details</span>
+            <button class="drawer-close" id="drawerClose">✕</button>
+        </div>
+        <div class="drawer-body" id="drawerBody">
+            <div class="empty-state">
+                <div class="empty-icon">📋</div>
+                <div class="empty-text">Select an alert to view details</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ═══ TOAST CONTAINER ═══ -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Shared JS -->
+    <script src="/static/js/app.js"></script>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>
