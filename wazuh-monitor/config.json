@@ -1,8 +1,5 @@
 {
     "wazuh": {
-        "api_url": "https://localhost:55000",
-        "username": "wazuh-wui",
-        "password": "",
         "verify_ssl": false
     },
     "dashboard": {

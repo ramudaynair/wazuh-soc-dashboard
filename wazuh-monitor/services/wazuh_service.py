@@ -145,6 +145,9 @@ def get_alerts(offset=0, limit=20, level=None, agent=None,
     """
     GET /manager/logs — fetch manager logs (used as alerts source).
     Wazuh 4.x manager/logs returns syslog-style entries.
+
+    When level="error" is requested, also fetch "critical" entries
+    since the Wazuh API only supports exact level matching.
     """
     params = {
         "offset": offset,
@@ -154,23 +157,38 @@ def get_alerts(offset=0, limit=20, level=None, agent=None,
         params["sort"] = sort
     else:
         params["sort"] = "-timestamp"
-    if level:
-        params["level"] = level
     if search:
         params["search"] = search
     if tag:
         params["tag"] = tag
 
-    data = _get("/manager/logs", params=params, cache_ttl=15)
-    items = data.get("data", {}).get("affected_items", [])
-    total = data.get("data", {}).get("total_affected_items", 0)
-
-    # Normalise each log entry into our alert format
-    normalised = []
-    for item in items:
-        normalised.append(_normalise_log(item))
-
-    return {"items": normalised, "total": total}
+    # If filtering for "error" level, also include "critical"
+    if level and level.lower() == "error":
+        all_items = []
+        total = 0
+        for lv in ("error", "critical"):
+            p = {**params, "level": lv}
+            try:
+                data = _get("/manager/logs", params=p, cache_ttl=15)
+                items = data.get("data", {}).get("affected_items", [])
+                total += data.get("data", {}).get("total_affected_items", 0)
+                all_items.extend(items)
+            except Exception:
+                pass
+        # Sort combined results by timestamp descending
+        all_items.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
+        # Apply limit
+        all_items = all_items[:limit]
+        normalised = [_normalise_log(item) for item in all_items]
+        return {"items": normalised, "total": total}
+    else:
+        if level:
+            params["level"] = level
+        data = _get("/manager/logs", params=params, cache_ttl=15)
+        items = data.get("data", {}).get("affected_items", [])
+        total = data.get("data", {}).get("total_affected_items", 0)
+        normalised = [_normalise_log(item) for item in items]
+        return {"items": normalised, "total": total}
 
 
 def get_security_alerts(offset=0, limit=20, level_min=None, agent_name=None,

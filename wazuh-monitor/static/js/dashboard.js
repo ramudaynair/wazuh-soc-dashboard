@@ -258,7 +258,7 @@ async function loadAgentHealth() {
 
 async function loadRecentEvents() {
     try {
-        const data = await api('/api/alerts?limit=10');
+        const data = await api('/api/alerts?limit=10&level=error');
         const items = data.items || [];
         const tbody = document.getElementById('recentEventsTbody');
         const badge = document.getElementById('recentEventCount');

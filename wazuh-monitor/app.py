@@ -16,7 +16,12 @@ import json
 import os
 import logging
 
+from dotenv import load_dotenv
 from flask import Flask, render_template, request, jsonify
+
+# ── Load .env ───────────────────────────────────────────────────
+
+load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
 
 from services.auth_service import auth
 from services.wazuh_service import (
@@ -70,16 +75,16 @@ def save_config(cfg):
 
 
 def init_auth_from_config():
-    """Configure the auth service from the saved config."""
-    cfg = load_config()
-    wz = cfg.get("wazuh", {})
-    api_url = wz.get("api_url", "")
-    username = wz.get("username", "")
-    password = wz.get("password", "")
-    verify = wz.get("verify_ssl", False)
+    """Configure the auth service from environment variables (.env)."""
+    api_url = os.environ.get("WAZUH_API_URL", "").rstrip("/")
+    username = os.environ.get("WAZUH_USERNAME", "")
+    password = os.environ.get("WAZUH_PASSWORD", "")
+    verify_env = os.environ.get("WAZUH_VERIFY_SSL", "false")
+    verify = verify_env.lower() in ("true", "1", "yes")
+
     if api_url and username and password:
         auth.configure(api_url, username, password, verify)
-        log.info("Auth configured for %s", api_url)
+        log.info("Auth configured for %s (credentials from .env)", api_url)
         # Attempt silent connect
         try:
             if auth.authenticate():
@@ -89,7 +94,8 @@ def init_auth_from_config():
         except Exception as exc:
             log.warning("Auto-connect failed with exception: %s", exc)
     else:
-        log.warning("Auth NOT configured — missing fields in config.json under 'wazuh' block (api_url: %s, username: %s, password set: %s)",
+        log.warning("Auth NOT configured — set WAZUH_API_URL, WAZUH_USERNAME, WAZUH_PASSWORD in .env  "
+                    "(api_url: %s, username: %s, password set: %s)",
                     bool(api_url), bool(username), bool(password))
 
 

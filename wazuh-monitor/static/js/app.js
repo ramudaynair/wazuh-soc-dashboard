@@ -201,13 +201,17 @@ function closeDrawer() {
 
 /* ── Formatters ────────────────────────────────────────────────── */
 
-function formatTime(iso) {
-    if (!iso) return '—';
+function formatTime(ts) {
+    if (!ts) return '—';
     try {
-        const d = new Date(iso);
-        return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' }) +
-            ' ' + d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
-    } catch { return iso; }
+        // Wazuh returns timestamps like "2024/06/24 10:30:00"
+        // JS Date() doesn't parse "/" format reliably — normalise to ISO
+        const normalised = ts.replace(/\//g, '-');
+        const d = new Date(normalised);
+        if (isNaN(d.getTime())) return ts;  // Fallback: show raw string
+        return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) +
+            ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
+    } catch { return ts; }
 }
 
 function formatRelative(iso) {
