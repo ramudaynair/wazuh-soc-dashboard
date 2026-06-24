@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+
+{% block title %}USB & Peripheral Activity — Wazuh Monitor{% endblock %}
+{% block page_title %}USB & Peripheral Activity{% endblock %}
+
+{% block content %}
+<div id="usbConfig" data-page-size="{{ page_size }}" class="hidden"></div>
+
+<!-- Summary Card -->
+<div class="stats-grid" style="margin-bottom: 20px;">
+    <div class="stat-card">
+        <div class="stat-card-header">
+            <span class="stat-card-label">USB Events Today</span>
+            <div class="stat-card-icon" style="background:rgba(240,136,62,.1);color:var(--orange)">🔌</div>
+        </div>
+        <div class="stat-card-value" style="color:var(--orange)" id="usbCount">0</div>
+        <div class="stat-card-footer">
+            <span>Removable media activity</span>
+        </div>
+    </div>
+</div>
+
+<div class="panel">
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+        <select class="filter-select" id="typeFilter">
+            <option value="">All USB Events</option>
+            <option value="inserted">Inserted</option>
+            <option value="removed">Removed</option>
+        </select>
+        
+        <input type="text" class="filter-input" id="searchInput" placeholder="Search by User, Device Vendor/Product, or Agent...">
+        
+        <button class="refresh-btn" id="resetFiltersBtn" style="padding: 6px 14px;">
+            Reset
+        </button>
+    </div>
+
+    <!-- Table -->
+    <div class="tbl-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 130px;">Event Type</th>
+                    <th>Device details / Raw log</th>
+                    <th style="width: 180px;">User</th>
+                    <th style="width: 180px;">Endpoint</th>
+                    <th style="width: 180px;">Timestamp</th>
+                </tr>
+            </thead>
+            <tbody id="usbTbody">
+                <tr>
+                    <td colspan="5">
+                        <div class="empty-state">
+                            <div class="empty-icon">🔍</div>
+                            <div class="empty-text">Loading USB events...</div>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination Footer -->
+    <div class="table-footer">
+        <span id="pageInfo">Showing 0-0 of 0 events</span>
+        <div class="page-btns">
+            <button class="page-btn" id="prevBtn" disabled>Previous</button>
+            <button class="page-btn" id="nextBtn" disabled>Next</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/usb.js"></script>
+{% endblock %}

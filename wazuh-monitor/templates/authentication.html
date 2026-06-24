@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+
+{% block title %}Authentication Monitoring — Wazuh Monitor{% endblock %}
+{% block page_title %}Authentication Monitoring{% endblock %}
+
+{% block content %}
+<div id="authConfig" data-page-size="{{ page_size }}" class="hidden"></div>
+
+<!-- Summary row -->
+<div class="stats-grid" style="margin-bottom: 20px;">
+    <div class="stat-card">
+        <div class="stat-card-header">
+            <span class="stat-card-label">Failed Logins Today</span>
+            <div class="stat-card-icon" style="background:rgba(248,81,73,.1);color:var(--red)">🔑</div>
+        </div>
+        <div class="stat-card-value" style="color:var(--red)" id="authFailedCount">0</div>
+        <div class="stat-card-footer">
+            <span>Invalid attempts</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-card-header">
+            <span class="stat-card-label">Successful Logins Today</span>
+            <div class="stat-card-icon" style="background:rgba(63,185,80,.1);color:var(--green)">✓</div>
+        </div>
+        <div class="stat-card-value" style="color:var(--green)" id="authSuccessCount">0</div>
+        <div class="stat-card-footer">
+            <span>Valid sessions</span>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-card-header">
+            <span class="stat-card-label">Locked Accounts Today</span>
+            <div class="stat-card-icon" style="background:rgba(240,136,62,.1);color:var(--high)">🔒</div>
+        </div>
+        <div class="stat-card-value" style="color:var(--high)" id="authLockedCount">0</div>
+        <div class="stat-card-footer">
+            <span>Due to login failures</span>
+        </div>
+    </div>
+</div>
+
+<div class="panel">
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+        <select class="filter-select" id="statusFilter">
+            <option value="">All Attempts</option>
+            <option value="success">Successful Logins</option>
+            <option value="failed">Failed Logins</option>
+        </select>
+        
+        <input type="text" class="filter-input" id="searchInput" placeholder="Search by Username, Source IP, or Device...">
+        
+        <button class="refresh-btn" id="resetFiltersBtn" style="padding: 6px 14px;">
+            Reset
+        </button>
+    </div>
+
+    <!-- Table -->
+    <div class="tbl-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 130px;">Status</th>
+                    <th style="width: 180px;">User</th>
+                    <th style="width: 160px;">Source IP</th>
+                    <th>Device/Endpoint</th>
+                    <th style="width: 180px;">Timestamp</th>
+                </tr>
+            </thead>
+            <tbody id="authTbody">
+                <tr>
+                    <td colspan="5">
+                        <div class="empty-state">
+                            <div class="empty-icon">🔍</div>
+                            <div class="empty-text">Loading authentication events...</div>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination Footer -->
+    <div class="table-footer">
+        <span id="pageInfo">Showing 0-0 of 0 events</span>
+        <div class="page-btns">
+            <button class="page-btn" id="prevBtn" disabled>Previous</button>
+            <button class="page-btn" id="nextBtn" disabled>Next</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/authentication.js"></script>
+{% endblock %}

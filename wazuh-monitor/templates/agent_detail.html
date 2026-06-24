@@ -23,7 +23,8 @@
 <!-- Tabs -->
 <div class="detail-tabs">
     <button class="detail-tab active" data-tab="overview">Overview</button>
-    <button class="detail-tab" data-tab="alerts">Recent Security Events</button>
+    <button class="detail-tab" data-tab="alerts">Security Events</button>
+    <button class="detail-tab" data-tab="apps">Installed Applications</button>
     <button class="detail-tab" data-tab="profile">System Inventory</button>
 </div>
 
@@ -55,13 +56,36 @@
             <div class="detail-info-value mono" id="infoLastSeen">—</div>
         </div>
     </div>
+
+    <!-- Chronological Activity Timeline -->
+    <div class="panel" style="margin-top: 25px;">
+        <div class="panel-head">
+            <span class="panel-title">📈 Actionable Activity Timeline</span>
+        </div>
+        <div class="timeline-container" id="timelineContainer" style="padding: 20px 10px;">
+            <div class="empty-state">
+                <div class="empty-icon">📈</div>
+                <div class="empty-text">Loading activity timeline...</div>
+            </div>
+        </div>
+    </div>
 </div>
 
-<!-- Tab Content: Alerts -->
+<!-- Tab Content: Security Events (Alerts) -->
 <div class="detail-tab-content" id="tabContent_alerts">
+    <!-- Category Sub-tabs -->
+    <div style="display: flex; gap: 8px; margin-bottom: 15px; overflow-x: auto; padding-bottom: 5px; border-bottom: 1px solid var(--border);">
+        <button class="page-btn active sec-cat-btn" data-sec-cat="">All Events</button>
+        <button class="page-btn sec-cat-btn" data-sec-cat="authentication">Authentication</button>
+        <button class="page-btn sec-cat-btn" data-sec-cat="applications">Applications</button>
+        <button class="page-btn sec-cat-btn" data-sec-cat="system">System</button>
+        <button class="page-btn sec-cat-btn" data-sec-cat="security">Security Policy</button>
+        <button class="page-btn sec-cat-btn" data-sec-cat="malware">Malware</button>
+    </div>
+
     <div class="panel">
         <div class="panel-head">
-            <span class="panel-title">Recent Alerts for this Agent</span>
+            <span class="panel-title">Recent Security Events</span>
             <span class="panel-badge" id="agentAlertCount">0 events</span>
         </div>
         <div class="tbl-wrap">
@@ -79,7 +103,7 @@
                         <td colspan="4">
                             <div class="empty-state">
                                 <div class="empty-icon">🔍</div>
-                                <div class="empty-text">Loading alerts logs...</div>
+                                <div class="empty-text">Loading events...</div>
                             </div>
                         </td>
                     </tr>
@@ -88,6 +112,39 @@
         </div>
     </div>
 </div>
+
+<!-- Tab Content: Installed Applications -->
+<div class="detail-tab-content" id="tabContent_apps">
+    <div class="panel">
+        <div class="panel-head">
+            <span class="panel-title">Installed Applications (Syscollector)</span>
+            <span class="panel-badge" id="agentAppCount">0 applications</span>
+        </div>
+        <div class="tbl-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Application Name</th>
+                        <th style="width: 150px;">Version</th>
+                        <th style="width: 250px;">Vendor</th>
+                        <th style="width: 180px;">Install Date</th>
+                    </tr>
+                </thead>
+                <tbody id="agentAppsTbody">
+                    <tr>
+                        <td colspan="4">
+                            <div class="empty-state">
+                                <div class="empty-icon">🔍</div>
+                                <div class="empty-text">Loading applications inventory...</div>
+                            </div>
+                        </td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
 
 <!-- Tab Content: System Profile -->
 <div class="detail-tab-content" id="tabContent_profile">

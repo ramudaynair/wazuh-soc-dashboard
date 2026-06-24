@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+
+{% block title %}Applications & Software — Wazuh Monitor{% endblock %}
+{% block page_title %}Applications & Software{% endblock %}
+
+{% block content %}
+<div id="appsConfig" data-page-size="{{ page_size }}" class="hidden"></div>
+
+<!-- Summary Card -->
+<div class="stats-grid" style="margin-bottom: 20px;">
+    <div class="stat-card">
+        <div class="stat-card-header">
+            <span class="stat-card-label">Software Installations Today</span>
+            <div class="stat-card-icon" style="background:rgba(88,166,255,.1);color:var(--blue)">📦</div>
+        </div>
+        <div class="stat-card-value" style="color:var(--blue)" id="appInstallCount">0</div>
+        <div class="stat-card-footer">
+            <span>New packages/changes</span>
+        </div>
+    </div>
+</div>
+
+<div class="panel">
+    <!-- View Switch Tabs -->
+    <div style="display: flex; gap: 10px; border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 15px;">
+        <button class="page-btn active" id="tabInventory" style="padding: 8px 16px; border-radius: 4px; font-weight: 500;">Installed Applications Inventory</button>
+        <button class="page-btn" id="tabChanges" style="padding: 8px 16px; border-radius: 4px; font-weight: 500;">Software Modification Events Log</button>
+    </div>
+
+    <!-- Filter Bar -->
+    <div class="filter-bar">
+        <input type="text" class="filter-input" id="searchInput" placeholder="Search by Application Name, Vendor, or Device...">
+        
+        <button class="refresh-btn" id="resetFiltersBtn" style="padding: 6px 14px;">
+            Reset
+        </button>
+    </div>
+
+    <!-- Inventory Table Container -->
+    <div class="tbl-wrap" id="inventoryTableContainer">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 200px;">Device/Endpoint</th>
+                    <th>Application Name</th>
+                    <th style="width: 150px;">Version</th>
+                    <th style="width: 200px;">Vendor</th>
+                    <th style="width: 180px;">Install Date</th>
+                </tr>
+            </thead>
+            <tbody id="inventoryTbody">
+                <tr>
+                    <td colspan="5">
+                        <div class="empty-state">
+                            <div class="empty-icon">🔍</div>
+                            <div class="empty-text">Loading application inventory...</div>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Changes Table Container (Hidden by default) -->
+    <div class="tbl-wrap hidden" id="changesTableContainer">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 120px;">Level</th>
+                    <th style="width: 180px;">Device/Endpoint</th>
+                    <th>Modification Event</th>
+                    <th style="width: 180px;">Timestamp</th>
+                </tr>
+            </thead>
+            <tbody id="changesTbody">
+                <tr>
+                    <td colspan="4">
+                        <div class="empty-state">
+                            <div class="empty-icon">🔍</div>
+                            <div class="empty-text">Loading software changes...</div>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination Footer -->
+    <div class="table-footer">
+        <span id="pageInfo">Showing 0-0 of 0 items</span>
+        <div class="page-btns">
+            <button class="page-btn" id="prevBtn" disabled>Previous</button>
+            <button class="page-btn" id="nextBtn" disabled>Next</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/applications.js"></script>
+{% endblock %}

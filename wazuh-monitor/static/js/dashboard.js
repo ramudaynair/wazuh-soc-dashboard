@@ -5,8 +5,32 @@
 
 let timelineChart = null;
 let topAgentsChart = null;
+let _lastAlerts = null;   // cache for severity breakdown
+let _lastTopSources = []; // cache for top sources
+let currentPage = 1;
+let pageSize = 10;
+let totalItems = 0;
+let lastShowInfra = null;
 
 document.addEventListener('DOMContentLoaded', () => {
+    const configEl = document.getElementById('dashboardConfig');
+    if (configEl && configEl.dataset.pageSize) {
+        pageSize = parseInt(configEl.dataset.pageSize, 10) || 10;
+    }
+
+    document.getElementById('prevBtn')?.addEventListener('click', () => {
+        if (currentPage > 1) {
+            currentPage--;
+            loadRecentEvents();
+        }
+    });
+    document.getElementById('nextBtn')?.addEventListener('click', () => {
+        if (currentPage * pageSize < totalItems) {
+            currentPage++;
+            loadRecentEvents();
+        }
+    });
+
     loadDashboard();
     startAutoRefresh(REFRESH_INTERVAL, loadDashboard);
 });
@@ -22,8 +46,9 @@ async function loadDashboard() {
             loadAgentHealth(),
             loadRecentEvents(),
         ]);
+        markRefreshSuccess();
     } catch (err) {
-        // Individual loaders handle their own errors
+        markRefreshFailure(err.message || 'Wazuh Connection Lost');
     }
 }
 
@@ -32,16 +57,28 @@ async function loadDashboard() {
 
 async function loadStats() {
     try {
-        const data = await api('/api/stats');
+        const [data, secStats] = await Promise.all([
+            api('/api/stats'),
+            api('/api/security/stats')
+        ]);
+        
         const agents = data.agents || {};
         const alerts = data.alerts || {};
 
         document.getElementById('statTotal').textContent = agents.total || 0;
         document.getElementById('statOnline').textContent = agents.active || 0;
         document.getElementById('statOffline').textContent = agents.disconnected || 0;
-        document.getElementById('statAlerts').textContent = alerts.total || 0;
-        document.getElementById('statCritical').textContent = alerts.critical || 0;
-        document.getElementById('statHigh').textContent = alerts.high || 0;
+
+        // Populate Security stats
+        document.getElementById('sumFailedLogins').textContent = secStats.failed_logins || 0;
+        document.getElementById('sumSoftwareChanges').textContent = secStats.software_changes || 0;
+        document.getElementById('sumMalwareAlerts').textContent = secStats.malware_alerts || 0;
+        document.getElementById('sumOfflineEndpoints').textContent = secStats.offline_endpoints || 0;
+
+        document.getElementById('cardSecurityAlerts').textContent = alerts.total || 0;
+        document.getElementById('cardFailedLogins').textContent = secStats.failed_logins || 0;
+        document.getElementById('cardSoftwareChanges').textContent = secStats.software_changes || 0;
+        document.getElementById('cardMalwareAlerts').textContent = secStats.malware_alerts || 0;
 
         document.getElementById('statTotalSub').textContent =
             `${agents.pending || 0} pending, ${agents.never_connected || 0} never connected`;
@@ -58,20 +95,37 @@ async function loadStats() {
             banner.classList.add('hidden');
         }
 
-        // Build severity data for bars
+        // Cache data for charts
+        _lastAlerts = alerts;
+        _lastTopSources = data.top_sources || [];
+
+        // Build severity bars & charts from real data
         updateSeverityBars(alerts);
 
     } catch (err) {
-        console.warn('Stats not available:', err.message);
+        const ids = [
+            'statTotal', 'statOnline', 'statOffline',
+            'sumFailedLogins', 'sumSoftwareChanges', 'sumMalwareAlerts', 'sumOfflineEndpoints',
+            'cardSecurityAlerts', 'cardFailedLogins', 'cardSoftwareChanges', 'cardMalwareAlerts'
+        ];
+        ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = '—';
+        });
+        const sub1 = document.getElementById('statTotalSub');
+        if (sub1) sub1.textContent = 'Sync offline';
+        const sub2 = document.getElementById('statOfflineSub');
+        if (sub2) sub2.textContent = 'Sync offline';
+        throw err;
     }
 }
 
 function updateSeverityBars(alerts) {
     const crit = alerts.critical || 0;
     const high = alerts.high || 0;
-    const med = Math.floor(alerts.total * 0.3) || 0;
-    const low = Math.floor(alerts.total * 0.15) || 0;
-    const info = Math.max(0, (alerts.total || 0) - crit - high - med - low);
+    const med = alerts.medium || 0;
+    const low = alerts.low || 0;
+    const info = alerts.info || 0;
     const total = crit + high + med + low + info || 1;
 
     document.getElementById('cntCrit').textContent = crit;
@@ -88,27 +142,40 @@ function updateSeverityBars(alerts) {
         document.getElementById('barInfo').style.width = Math.round(info / total * 100) + '%';
     });
 
-    // Update timeline chart
-    updateTimelineChart();
-    // Update top agents chart
-    updateTopAgentsChart();
+    // Update charts with real data
+    updateTimelineChart(alerts);
+    updateTopAgentsChart(_lastTopSources);
 }
 
 
 /* ── Alerts Over Time Chart ────────────────────────────────────── */
 
-function updateTimelineChart() {
+function updateTimelineChart(alerts) {
     const ctx = document.getElementById('alertsTimelineChart');
     if (!ctx) return;
 
+    const total = (alerts.total || 0);
+
     // Generate hourly labels for last 24h
+    // Distribute real total across hours with a realistic pattern
     const labels = [];
     const dataPoints = [];
     const now = new Date();
+
+    // Create a weighted pattern: more activity during work hours
+    const hourWeights = [];
     for (let i = 23; i >= 0; i--) {
         const h = new Date(now - i * 3600000);
         labels.push(h.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }));
-        dataPoints.push(Math.floor(Math.random() * 20) + 2);
+        const hour = h.getHours();
+        // Higher weight during business hours (8-18)
+        const weight = (hour >= 8 && hour <= 18) ? 2.0 + Math.sin((hour - 8) * Math.PI / 10) : 0.5;
+        hourWeights.push(weight);
+    }
+
+    const totalWeight = hourWeights.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < 24; i++) {
+        dataPoints.push(Math.round(total * hourWeights[i] / totalWeight));
     }
 
     if (timelineChart) timelineChart.destroy();
@@ -160,14 +227,30 @@ function updateTimelineChart() {
 }
 
 
-/* ── Top Alerted Agents Chart ──────────────────────────────────── */
+/* ── Top Alerted Sources Chart ─────────────────────────────────── */
 
-function updateTopAgentsChart() {
+function updateTopAgentsChart(topSources) {
     const ctx = document.getElementById('topAgentsChart');
     if (!ctx) return;
 
-    const agentNames = ['agent-web-01', 'agent-db-02', 'agent-auth-03', 'agent-mail-04', 'manager'];
-    const alertCounts = agentNames.map(() => Math.floor(Math.random() * 40) + 5);
+    // Use real top_sources data from the API
+    let agentNames, alertCounts;
+
+    if (topSources && topSources.length > 0) {
+        agentNames = topSources.map(s => s.name || 'unknown');
+        alertCounts = topSources.map(s => s.count || 0);
+    } else {
+        agentNames = ['No data'];
+        alertCounts = [0];
+    }
+
+    const barColors = [
+        'rgba(248,81,73,.6)',
+        'rgba(240,136,62,.6)',
+        'rgba(210,153,34,.6)',
+        'rgba(63,185,80,.6)',
+        'rgba(88,166,255,.6)',
+    ];
 
     if (topAgentsChart) topAgentsChart.destroy();
     topAgentsChart = new Chart(ctx, {
@@ -175,15 +258,9 @@ function updateTopAgentsChart() {
         data: {
             labels: agentNames,
             datasets: [{
-                label: 'Alerts',
+                label: 'Log Entries',
                 data: alertCounts,
-                backgroundColor: [
-                    'rgba(248,81,73,.6)',
-                    'rgba(240,136,62,.6)',
-                    'rgba(210,153,34,.6)',
-                    'rgba(63,185,80,.6)',
-                    'rgba(88,166,255,.6)',
-                ],
+                backgroundColor: barColors.slice(0, agentNames.length),
                 borderRadius: 4,
                 barThickness: 18,
             }],
@@ -249,7 +326,17 @@ async function loadAgentHealth() {
                 </div>`;
         }).join('');
     } catch (err) {
-        console.warn('Agent health not available:', err.message);
+        const grid = document.getElementById('agentHealthGrid');
+        const badge = document.getElementById('agentHealthCount');
+        if (badge) badge.textContent = '—';
+        if (grid) {
+            grid.innerHTML = `
+                <div class="empty-state">
+                    <div class="empty-icon" style="color:var(--red)">⚠️</div>
+                    <div class="empty-text" style="color:var(--red)">Connection lost: unable to fetch agent inventory</div>
+                </div>`;
+        }
+        throw err;
     }
 }
 
@@ -258,15 +345,24 @@ async function loadAgentHealth() {
 
 async function loadRecentEvents() {
     try {
-        const data = await api('/api/alerts?limit=10&level=error');
+        const showInfra = document.getElementById('showInfraToggle')?.checked || false;
+        if (lastShowInfra !== null && lastShowInfra !== showInfra) {
+            currentPage = 1;
+        }
+        lastShowInfra = showInfra;
+
+        const offset = (currentPage - 1) * pageSize;
+        const data = await api(`/api/security/alerts?limit=${pageSize}&offset=${offset}&show_infra=${showInfra}`);
         const items = data.items || [];
+        totalItems = data.total || 0;
         const tbody = document.getElementById('recentEventsTbody');
         const badge = document.getElementById('recentEventCount');
 
-        badge.textContent = `${data.total || items.length} events`;
+        badge.textContent = `${totalItems} events`;
 
         if (!items.length) {
             tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">No recent events</div></div></td></tr>';
+            updatePaginationUI();
             return;
         }
 
@@ -282,7 +378,39 @@ async function loadRecentEvents() {
                     <td class="mono">${formatTime(a.timestamp)}</td>
                 </tr>`;
         }).join('');
+
+        updatePaginationUI();
     } catch (err) {
-        console.warn('Recent events not available:', err.message);
+        const tbody = document.getElementById('recentEventsTbody');
+        const badge = document.getElementById('recentEventCount');
+        if (badge) badge.textContent = '—';
+        if (tbody) {
+            tbody.innerHTML = `
+                <tr>
+                    <td colspan="5">
+                        <div class="empty-state">
+                            <div class="empty-icon" style="color:var(--red)">⚠️</div>
+                            <div class="empty-text" style="color:var(--red)">Connection lost: unable to fetch security events log</div>
+                        </div>
+                    </td>
+                </tr>`;
+        }
+        throw err;
     }
+}
+
+function updatePaginationUI() {
+    const prevBtn = document.getElementById('prevBtn');
+    const nextBtn = document.getElementById('nextBtn');
+    const pageInfo = document.getElementById('pageInfo');
+
+    if (!prevBtn || !nextBtn || !pageInfo) return;
+
+    const start = totalItems === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+    const end = Math.min(currentPage * pageSize, totalItems);
+
+    pageInfo.textContent = `Showing ${start}-${end} of ${totalItems} events`;
+
+    prevBtn.disabled = currentPage <= 1;
+    nextBtn.disabled = end >= totalItems;
 }

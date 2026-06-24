@@ -16,7 +16,11 @@ async function api(path, options = {}) {
             const err = await resp.json().catch(() => ({ error: resp.statusText }));
             throw new Error(err.error || `HTTP ${resp.status}`);
         }
-        return resp.json();
+        const data = await resp.json();
+        if (!path.startsWith('/api/status')) {
+            markRefreshSuccess();
+        }
+        return data;
     } catch (err) {
         console.error(`API error: ${path}`, err);
         throw err;
@@ -58,7 +62,68 @@ function escapeHtml(str) {
 }
 
 
-/* ── Status Dot ────────────────────────────────────────────────── */
+/* ── Status Dot & Freshness Helpers ────────────────────────────── */
+
+let lastSuccessfulRefresh = null;
+let isSourceAvailable = true;
+
+function markRefreshSuccess() {
+    lastSuccessfulRefresh = new Date();
+    isSourceAvailable = true;
+    
+    const banner = document.getElementById('errorBanner');
+    if (banner) banner.style.display = 'none';
+
+    const dot = document.getElementById('statusDot');
+    const label = document.getElementById('statusLabel');
+    if (dot && label) {
+        dot.className = 'status-dot connected';
+        label.textContent = 'Connected';
+    }
+    updateFreshnessText();
+}
+
+function markRefreshFailure(errorMessage) {
+    isSourceAvailable = false;
+    
+    const banner = document.getElementById('errorBanner');
+    const msgEl = document.getElementById('errorMessage');
+    const freshEl = document.getElementById('errorFreshness');
+    if (banner && msgEl && freshEl) {
+        msgEl.textContent = errorMessage || 'Wazuh Data Source Unavailable';
+        if (lastSuccessfulRefresh) {
+            freshEl.textContent = `Last successful refresh: ${lastSuccessfulRefresh.toLocaleTimeString('en-GB')} IST`;
+        } else {
+            freshEl.textContent = 'Last successful refresh: Never';
+        }
+        banner.style.display = 'flex';
+    }
+
+    const dot = document.getElementById('statusDot');
+    const label = document.getElementById('statusLabel');
+    if (dot && label) {
+        dot.className = 'status-dot error';
+        label.textContent = 'Disconnected';
+    }
+}
+
+function updateFreshnessText() {
+    const el = document.getElementById('freshnessIndicator');
+    if (!el) return;
+    if (!lastSuccessfulRefresh) {
+        el.textContent = 'Last sync: Never';
+        return;
+    }
+    const diffSeconds = Math.floor((new Date() - lastSuccessfulRefresh) / 1000);
+    if (diffSeconds < 5) {
+        el.textContent = 'Last sync: just now';
+    } else if (diffSeconds < 60) {
+        el.textContent = `Last sync: ${diffSeconds}s ago`;
+    } else {
+        const diffMinutes = Math.floor(diffSeconds / 60);
+        el.textContent = `Last sync: ${diffMinutes}m ${diffSeconds % 60}s ago`;
+    }
+}
 
 function updateConnectionStatus() {
     api('/api/status')
@@ -68,17 +133,20 @@ function updateConnectionStatus() {
             if (!dot || !label) return;
 
             if (data.connected) {
-                dot.className = 'status-dot connected';
-                label.textContent = 'Connected';
-            } else if (data.last_error) {
-                dot.className = 'status-dot error';
-                label.textContent = 'Disconnected';
+                if (isSourceAvailable) {
+                    dot.className = 'status-dot connected';
+                    label.textContent = 'Connected';
+                    const banner = document.getElementById('errorBanner');
+                    if (banner) banner.style.display = 'none';
+                }
             } else {
-                dot.className = 'status-dot';
-                label.textContent = 'Not connected';
+                const errMsg = data.last_error || 'Disconnected from Wazuh server';
+                markRefreshFailure(errMsg);
             }
         })
-        .catch(() => {});
+        .catch(err => {
+            markRefreshFailure(err.message || 'Wazuh Monitor Service Offline');
+        });
 }
 
 
@@ -204,13 +272,16 @@ function closeDrawer() {
 function formatTime(ts) {
     if (!ts) return '—';
     try {
-        // Wazuh returns timestamps like "2024/06/24 10:30:00"
-        // JS Date() doesn't parse "/" format reliably — normalise to ISO
-        const normalised = ts.replace(/\//g, '-');
+        // Wazuh /manager/logs returns timestamps in server local time
+        // but appends "Z" suffix — strip it to avoid incorrect UTC conversion
+        let normalised = ts.replace(/\//g, '-');
+        // Remove trailing Z so JS treats it as local time, not UTC
+        normalised = normalised.replace(/Z$/i, '');
         const d = new Date(normalised);
         if (isNaN(d.getTime())) return ts;  // Fallback: show raw string
-        return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric', timeZone: 'Asia/Kolkata' }) +
-            ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Kolkata' });
+        return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) +
+            ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) +
+            ' IST';
     } catch { return ts; }
 }
 
@@ -307,7 +378,8 @@ document.addEventListener('DOMContentLoaded', () => {
     updateClock();
     setInterval(updateClock, 1000);
     updateConnectionStatus();
-    setInterval(updateConnectionStatus, 30000);
+    setInterval(updateConnectionStatus, 15000); // Check API health every 15s
+    setInterval(updateFreshnessText, 1000); // Update freshness text every second
 
     // Drawer close handlers
     const overlay = document.getElementById('drawerOverlay');

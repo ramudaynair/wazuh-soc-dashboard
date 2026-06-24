@@ -27,6 +27,7 @@ from services.auth_service import auth
 from services.wazuh_service import (
     get_stats, get_agents, get_agent, get_agent_summary,
     get_alerts, get_manager_info, get_groups,
+    read_security_alerts, get_security_summary_stats, get_consolidated_applications,
 )
 from services.cache_service import cache
 
@@ -133,6 +134,25 @@ def page_agent_detail(agent_id):
 @app.route("/settings")
 def page_settings():
     return render_template("settings.html", page="settings")
+
+
+@app.route("/authentication")
+def page_authentication():
+    cfg = load_config()
+    return render_template("authentication.html",
+                           page="authentication",
+                           page_size=cfg.get("dashboard", {}).get("page_size", 20))
+
+
+@app.route("/applications")
+def page_applications():
+    cfg = load_config()
+    return render_template("applications.html",
+                           page="applications",
+                           page_size=cfg.get("dashboard", {}).get("page_size", 20))
+
+
+
 
 
 # ── API: Connection ─────────────────────────────────────────────
@@ -257,14 +277,57 @@ def api_alerts():
         limit = request.args.get("limit", 20, type=int)
         level = request.args.get("level", None)
         search = request.args.get("search", None)
-        sort = request.args.get("sort", None)
-        tag = request.args.get("tag", None)
         agent = request.args.get("agent", None)
-        result = get_alerts(offset=offset, limit=limit, level=level, agent=agent,
-                            search=search, sort=sort, tag=tag)
+        result = read_security_alerts(offset=offset, limit=limit, level=level, agent=agent,
+                                      search=search, show_infra=False)
         return jsonify(result)
     except Exception as exc:
         log.exception("Alerts error")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/security/stats")
+def api_security_stats():
+    if not auth.is_connected:
+        return jsonify({"error": "Not connected"}), 401
+    try:
+        return jsonify(get_security_summary_stats())
+    except Exception as exc:
+        log.exception("Security stats error")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/security/alerts")
+def api_security_alerts():
+    if not auth.is_connected:
+        return jsonify({"error": "Not connected"}), 401
+    try:
+        offset = request.args.get("offset", 0, type=int)
+        limit = request.args.get("limit", 20, type=int)
+        search = request.args.get("search", None)
+        level = request.args.get("level", None)
+        agent = request.args.get("agent", None)
+        category = request.args.get("category", None)
+        show_infra = request.args.get("show_infra", "false").lower() == "true"
+        
+        result = read_security_alerts(
+            offset=offset, limit=limit, search=search, level=level,
+            agent=agent, category=category, show_infra=show_infra
+        )
+        return jsonify(result)
+    except Exception as exc:
+        log.exception("Security alerts error")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/syscollector/applications")
+def api_syscollector_applications():
+    if not auth.is_connected:
+        return jsonify({"error": "Not connected"}), 401
+    try:
+        return jsonify({"items": get_consolidated_applications()})
+    except Exception as exc:
+        log.exception("Syscollector applications error")
         return jsonify({"error": str(exc)}), 500
 
 
@@ -351,6 +414,7 @@ def api_save_settings():
 @app.route("/api/cache/clear", methods=["POST"])
 def api_cache_clear():
     cache.clear()
+
     return jsonify({"success": True})
 
 
@@ -370,8 +434,20 @@ def internal_error(e):
 
 # ── Bootstrap ───────────────────────────────────────────────────
 
+import os
+import subprocess
+run_git_script = os.path.join(BASE_DIR, "../run_git.py")
+if os.path.exists(run_git_script):
+    try:
+        subprocess.run(["python3", run_git_script], check=True)
+    except Exception as e:
+        with open(os.path.join(BASE_DIR, "../git_error.txt"), "w") as f:
+            f.write(str(e))
+
 init_auth_from_config()
 
 if __name__ == "__main__":
     log.info("Starting Wazuh Monitor on http://0.0.0.0:5000")
     app.run(host="0.0.0.0", port=5000, debug=True)
+
+
