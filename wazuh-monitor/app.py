@@ -414,7 +414,13 @@ def api_save_settings():
 @app.route("/api/cache/clear", methods=["POST"])
 def api_cache_clear():
     cache.clear()
-
+    # Also reset the in-memory alerts cache so the next request
+    # triggers a full re-parse (picks up any updated dedup logic)
+    from services.wazuh_service import _alerts_cache, _alerts_cache_lock
+    with _alerts_cache_lock:
+        _alerts_cache["size"] = 0
+        _alerts_cache["last_pos"] = 0
+        _alerts_cache["parsed_events"] = []
     return jsonify({"success": True})
 
 
@@ -433,17 +439,6 @@ def internal_error(e):
 
 
 # ── Bootstrap ───────────────────────────────────────────────────
-
-import os
-import subprocess
-run_git_script = os.path.join(BASE_DIR, "../run_git.py")
-if os.path.exists(run_git_script):
-    try:
-        subprocess.run(["python3", run_git_script], check=True)
-    except Exception as e:
-        with open(os.path.join(BASE_DIR, "../git_error.txt"), "w") as f:
-            f.write(str(e))
-
 init_auth_from_config()
 
 if __name__ == "__main__":

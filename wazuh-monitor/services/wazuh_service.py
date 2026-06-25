@@ -444,7 +444,8 @@ def _get_cached_security_alerts():
                             alerts.append(parsed)
                     except Exception:
                         continue
-
+                # Deduplicate repeated Low/Info events (same rule+agent+desc within same second)
+                alerts = _deduplicate_low_severity(alerts)
                 # Sort newest first
                 alerts.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
                 
@@ -492,7 +493,8 @@ def _get_cached_security_alerts():
                 new_events.sort(key=lambda x: x.get("timestamp", ""), reverse=True)
                 # Prepend new events to existing cache
                 combined = new_events + _alerts_cache["parsed_events"]
-
+                # Deduplicate Low/Info events across the full combined set
+                combined = _deduplicate_low_severity(combined)
                 # Keep only last 15,000 events
                 _alerts_cache["parsed_events"] = combined[:15000]
 
@@ -823,7 +825,65 @@ def _normalize_security_event(raw):
     }
 
 
+def _deduplicate_low_severity(alerts):
+    """
+    Suppress burst-duplicate events for Low / Info severity (rule level < 7).
 
+    A burst duplicate is defined as an event that shares the same:
+      - Rule ID
+      - Agent ID
+      - Description (stripped, case-insensitive)
+    AND whose timestamp falls within BURST_WINDOW_SECONDS of the last
+    kept event with the same key.
+
+    Because alerts arrive newest-first, we anchor the window on the most
+    recent kept event.  Any older event within 60 s is dropped; one that
+    is further back in time resets the anchor so we get one representative
+    per quiet period.
+
+    Events with rule level >= 7 (Medium, High, Critical) are never touched.
+    """
+    BURST_WINDOW_SECONDS = 60
+
+    # key -> datetime of the last kept event for that (rule, agent, desc) combo
+    seen: dict = {}
+    result = []
+
+    for event in alerts:
+        level = event.get("rule", {}).get("level", 0)
+        if level >= 7:
+            # Medium / High / Critical — always keep, no dedup
+            result.append(event)
+            continue
+
+        rule_id  = str(event.get("rule", {}).get("id", ""))
+        agent_id = str(event.get("agent", {}).get("id", ""))
+        desc     = event.get("rule", {}).get("description", "").strip().lower()
+        ts_raw   = event.get("timestamp", "")[:19]  # YYYY-MM-DDTHH:MM:SS
+
+        key = (rule_id, agent_id, desc)
+
+        # Try to parse the truncated ISO timestamp as a naive datetime
+        try:
+            event_dt = datetime.strptime(ts_raw, "%Y-%m-%dT%H:%M:%S")
+        except (ValueError, TypeError):
+            # Unparseable timestamp — always keep to avoid data loss
+            result.append(event)
+            continue
+
+        if key not in seen:
+            # First time we see this (rule, agent, desc) — always keep
+            seen[key] = event_dt
+            result.append(event)
+        else:
+            diff = abs((seen[key] - event_dt).total_seconds())
+            if diff > BURST_WINDOW_SECONDS:
+                # Far enough from the last kept event — keep and reset anchor
+                seen[key] = event_dt
+                result.append(event)
+            # else: within the 60-second burst window — silently drop
+
+    return result
 
 
 def get_security_summary_stats():
