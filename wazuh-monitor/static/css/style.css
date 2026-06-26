@@ -231,6 +231,7 @@ a:hover { text-decoration: underline; }
     display: flex;
     flex-direction: column;
     transition: margin-left .25s cubic-bezier(.4,0,.2,1);
+    min-width: 0;
 }
 
 .sidebar.collapsed ~ .main-content {

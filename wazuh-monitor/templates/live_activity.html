@@ -8,9 +8,9 @@
     /* Styling extension for Live Activity view */
     .live-tabs-container {
         display: flex;
-        gap: 6px;
-        overflow-x: auto;
-        padding-bottom: 8px;
+        flex-wrap: wrap;
+        gap: 8px;
+        padding-bottom: 12px;
         margin-bottom: 20px;
         border-bottom: 1px solid var(--border);
     }
@@ -184,17 +184,17 @@
 
 <!-- Tabs Navigation -->
 <div class="live-tabs-container">
-    <button class="live-tab active" data-tab="processes">🚀 Process Creation (ID 1)</button>
-    <button class="live-tab" data-tab="dns">🌐 DNS Queries (ID 22)</button>
-    <button class="live-tab" data-tab="files">📁 File Creations (ID 11)</button>
-    <button class="live-tab" data-tab="registry">🧠 Registry Changes (ID 13)</button>
-    <button class="live-tab" data-tab="network">🔌 Network Connections (ID 3)</button>
-    <button class="live-tab" data-tab="access">🔒 Process Access (ID 10)</button>
-    <button class="live-tab" data-tab="advanced">🔍 Advanced Viewer</button>
-    <button class="live-tab" data-tab="tree">🌳 Process Tree</button>
-    <button class="live-tab" data-tab="dns_activity">📊 DNS Analytics</button>
-    <button class="live-tab" data-tab="file_activity">📊 File Operations</button>
-    <button class="live-tab" data-tab="timeline">📈 Threat Timeline</button>
+    <button class="live-tab active" data-tab="processes">🚀 Processes</button>
+    <button class="live-tab" data-tab="dns">🌐 DNS</button>
+    <button class="live-tab" data-tab="files">📁 Files</button>
+    <button class="live-tab" data-tab="registry">🧠 Registry</button>
+    <button class="live-tab" data-tab="network">🔌 Network</button>
+    <button class="live-tab" data-tab="access">🔒 Access</button>
+    <button class="live-tab" data-tab="advanced">🔍 Advanced</button>
+    <button class="live-tab" data-tab="tree">🌳 Tree</button>
+    <button class="live-tab" data-tab="dns_activity">📊 DNS Stats</button>
+    <button class="live-tab" data-tab="file_activity">📊 File Stats</button>
+    <button class="live-tab" data-tab="timeline">📈 Timeline</button>
 </div>
 
 <!-- Main view card panel -->
@@ -351,7 +351,7 @@
     </div>
 
     <!-- Process Tree Diagram -->
-    <div class="tab-view" id="view_tree" style="display: none; padding: 25px;">
+    <div class="tab-view" id="view_tree" style="display: none; padding: 25px; max-height: 520px; overflow: auto;">
         <div id="treeContainer">
             <div class="empty-state">
                 <div class="empty-icon">🌳</div>
@@ -403,7 +403,7 @@
     </div>
 
     <!-- Threat Timeline View -->
-    <div class="tab-view" id="view_timeline" style="display: none; padding: 10px 25px 25px;">
+    <div class="tab-view" id="view_timeline" style="display: none; padding: 10px 25px 25px; max-height: 520px; overflow-y: auto;">
         <div class="seq-timeline" id="seqTimeline">
             <div class="empty-state">
                 <div class="empty-icon">📈</div>
