@@ -1,0 +1,428 @@
+{% extends "base.html" %}
+
+{% block title %}Live Endpoint Activity — Wazuh Monitor{% endblock %}
+{% block page_title %}🔥 Live Endpoint Activity{% endblock %}
+
+{% block head %}
+<style>
+    /* Styling extension for Live Activity view */
+    .live-tabs-container {
+        display: flex;
+        gap: 6px;
+        overflow-x: auto;
+        padding-bottom: 8px;
+        margin-bottom: 20px;
+        border-bottom: 1px solid var(--border);
+    }
+    .live-tab {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        padding: 6px 12px;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-size: 12px;
+        font-weight: 500;
+        white-space: nowrap;
+        transition: all var(--transition);
+    }
+    .live-tab:hover {
+        border-color: var(--border2);
+        color: var(--text);
+    }
+    .live-tab.active {
+        background: var(--panel);
+        border-color: var(--wazuh);
+        color: var(--text);
+    }
+    .live-header-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 20px;
+        gap: 15px;
+        flex-wrap: wrap;
+    }
+    .live-filters {
+        display: flex;
+        gap: 10px;
+        align-items: center;
+        flex-wrap: wrap;
+    }
+    .live-status-container {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        font-size: 12px;
+    }
+    .live-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background-color: var(--green);
+        animation: pulse-live 1.5s infinite;
+    }
+    @keyframes pulse-live {
+        0% { opacity: 0.4; }
+        50% { opacity: 1; }
+        100% { opacity: 0.4; }
+    }
+    /* Process tree rendering css */
+    .tree-node {
+        margin-left: 20px;
+        border-left: 1px dashed var(--border2);
+        padding-left: 15px;
+        position: relative;
+        margin-top: 8px;
+    }
+    .tree-node::before {
+        content: "";
+        position: absolute;
+        top: 10px;
+        left: 0;
+        width: 10px;
+        height: 1px;
+        border-top: 1px dashed var(--border2);
+    }
+    .tree-box {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 8px 12px;
+        display: inline-block;
+        min-width: 250px;
+        box-shadow: 0 2px 5px rgba(0,0,0,0.2);
+    }
+    .tree-title {
+        font-weight: 600;
+        color: var(--blue);
+        margin-bottom: 3px;
+        font-size: 12px;
+    }
+    .tree-meta {
+        font-size: 11px;
+        color: var(--muted);
+        font-family: monospace;
+    }
+    /* Timeline style */
+    .seq-timeline {
+        position: relative;
+        padding-left: 30px;
+        margin-top: 15px;
+    }
+    .seq-timeline::before {
+        content: "";
+        position: absolute;
+        top: 5px;
+        bottom: 5px;
+        left: 9px;
+        width: 2px;
+        background-color: var(--border);
+    }
+    .seq-item {
+        position: relative;
+        margin-bottom: 20px;
+    }
+    .seq-dot {
+        position: absolute;
+        left: -26px;
+        top: 3px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background-color: var(--wazuh);
+        border: 2px solid var(--bg);
+    }
+    .seq-content {
+        background: var(--surface);
+        border: 1px solid var(--border);
+        border-radius: var(--radius-sm);
+        padding: 10px 14px;
+    }
+    /* Stat cards */
+    .stat-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+        gap: 15px;
+        margin-bottom: 20px;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<!-- Page Controls -->
+<div class="live-header-bar">
+    <div class="live-filters">
+        <select id="agentFilter" class="filter-select" onchange="changeFilters()">
+            <option value="">All Endpoints</option>
+        </select>
+        <input type="text" id="liveSearch" class="filter-input" placeholder="Search cmd, hash, IP..." oninput="changeFilters()">
+        <select id="severityFilter" class="filter-select" onchange="changeFilters()">
+            <option value="">All Severities</option>
+            <option value="high">High Level (&gt;=8)</option>
+            <option value="medium">Medium Level (4-7)</option>
+            <option value="low">Low Level (0-3)</option>
+        </select>
+        <select id="timeRangeFilter" class="filter-select" onchange="changeFilters()">
+            <option value="all" selected>All Time</option>
+            <option value="1">Last 1 Hour</option>
+            <option value="24">Last 24 Hours</option>
+            <option value="168">Last 7 Days</option>
+        </select>
+    </div>
+    
+    <div style="display: flex; align-items: center; gap: 15px;">
+        <div class="live-status-container">
+            <div class="live-dot" id="liveModeDot"></div>
+            <span id="liveStatusText" style="font-weight: 500;">Live Mode: On (5s)</span>
+        </div>
+        <button class="page-btn" id="refreshBtn" onclick="fetchTelemetry()" style="background: var(--panel);">
+            🔄 Force Refresh
+        </button>
+    </div>
+</div>
+
+<!-- Tabs Navigation -->
+<div class="live-tabs-container">
+    <button class="live-tab active" data-tab="processes">🚀 Process Creation (ID 1)</button>
+    <button class="live-tab" data-tab="dns">🌐 DNS Queries (ID 22)</button>
+    <button class="live-tab" data-tab="files">📁 File Creations (ID 11)</button>
+    <button class="live-tab" data-tab="registry">🧠 Registry Changes (ID 13)</button>
+    <button class="live-tab" data-tab="network">🔌 Network Connections (ID 3)</button>
+    <button class="live-tab" data-tab="access">🔒 Process Access (ID 10)</button>
+    <button class="live-tab" data-tab="advanced">🔍 Advanced Viewer</button>
+    <button class="live-tab" data-tab="tree">🌳 Process Tree</button>
+    <button class="live-tab" data-tab="dns_activity">📊 DNS Analytics</button>
+    <button class="live-tab" data-tab="file_activity">📊 File Operations</button>
+    <button class="live-tab" data-tab="timeline">📈 Threat Timeline</button>
+</div>
+
+<!-- Main view card panel -->
+<div class="panel">
+    <div class="panel-head">
+        <span class="panel-title" id="panelTitle">🚀 Recent Process Creation Events</span>
+        <span class="panel-badge" id="eventBadgeCount">0 events</span>
+    </div>
+
+    <!-- Live Processes Table -->
+    <div class="tab-view active" id="view_processes">
+        <div class="tbl-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 150px;">Time</th>
+                        <th style="width: 120px;">Agent</th>
+                        <th style="width: 150px;">Process</th>
+                        <th>Command Line</th>
+                        <th style="width: 120px;">User</th>
+                        <th style="width: 120px;">Parent Process</th>
+                        <th style="width: 120px;">MITRE technique</th>
+                    </tr>
+                </thead>
+                <tbody id="processesTbody">
+                    <tr><td colspan="7"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Loading events...</div></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Live DNS Table -->
+    <div class="tab-view" id="view_dns" style="display: none;">
+        <div class="tbl-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 150px;">Time</th>
+                        <th style="width: 120px;">Agent</th>
+                        <th>Query Name (Domain)</th>
+                        <th style="width: 120px;">Status</th>
+                        <th style="width: 200px;">Querying Process</th>
+                    </tr>
+                </thead>
+                <tbody id="dnsTbody">
+                    <tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Loading events...</div></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Live File Table -->
+    <div class="tab-view" id="view_files" style="display: none;">
+        <div class="tbl-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 150px;">Time</th>
+                        <th style="width: 120px;">Agent</th>
+                        <th>Target Filename</th>
+                        <th style="width: 200px;">Creating Process</th>
+                        <th style="width: 120px;">User</th>
+                    </tr>
+                </thead>
+                <tbody id="filesTbody">
+                    <tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Loading events...</div></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Live Registry Table -->
+    <div class="tab-view" id="view_registry" style="display: none;">
+        <div class="tbl-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 150px;">Time</th>
+                        <th style="width: 120px;">Agent</th>
+                        <th>Registry Path (Target Object)</th>
+                        <th>Details</th>
+                        <th style="width: 200px;">Process</th>
+                    </tr>
+                </thead>
+                <tbody id="registryTbody">
+                    <tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Loading events...</div></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Live Network Connections Table -->
+    <div class="tab-view" id="view_network" style="display: none;">
+        <div class="tbl-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 150px;">Time</th>
+                        <th style="width: 120px;">Agent</th>
+                        <th style="width: 200px;">Process</th>
+                        <th>Source IP / Port</th>
+                        <th>Destination IP / Port</th>
+                        <th style="width: 100px;">Protocol</th>
+                    </tr>
+                </thead>
+                <tbody id="networkTbody">
+                    <tr><td colspan="6"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Loading events...</div></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Process Access Table -->
+    <div class="tab-view" id="view_access" style="display: none;">
+        <div class="tbl-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 150px;">Time</th>
+                        <th style="width: 120px;">Agent</th>
+                        <th style="width: 220px;">Source Process (Accesser)</th>
+                        <th style="width: 220px;">Target Process (Accessed)</th>
+                        <th>MITRE Technique</th>
+                    </tr>
+                </thead>
+                <tbody id="accessTbody">
+                    <tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Loading events...</div></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Advanced Event Viewer Table -->
+    <div class="tab-view" id="view_advanced" style="display: none;">
+        <div class="tbl-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th style="width: 150px;">Time</th>
+                        <th style="width: 70px;">Event ID</th>
+                        <th style="width: 120px;">Agent</th>
+                        <th style="width: 150px;">Process</th>
+                        <th>Command Line / Detail</th>
+                        <th style="width: 120px;">User</th>
+                        <th style="width: 110px;">MITRE</th>
+                        <th style="width: 80px;">Severity</th>
+                    </tr>
+                </thead>
+                <tbody id="advancedTbody">
+                    <tr><td colspan="8"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Loading events...</div></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Process Tree Diagram -->
+    <div class="tab-view" id="view_tree" style="display: none; padding: 25px;">
+        <div id="treeContainer">
+            <div class="empty-state">
+                <div class="empty-icon">🌳</div>
+                <div class="empty-text">No Process Tree available. Select a specific Agent or search query to construct a spawner tree hierarchy.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- DNS Analytics Dash -->
+    <div class="tab-view" id="view_dns_activity" style="display: none; padding: 20px;">
+        <div class="stat-grid" id="dnsStatsGrid">
+            <!-- Populated dynamically -->
+        </div>
+        <div class="tbl-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Domain</th>
+                        <th style="width: 150px;">Lookup Count</th>
+                        <th style="width: 200px;">Active Querying Agents</th>
+                    </tr>
+                </thead>
+                <tbody id="dnsStatsTbody">
+                    <tr><td colspan="3"><div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">No DNS activity logs found.</div></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- File Operations Dash -->
+    <div class="tab-view" id="view_file_activity" style="display: none; padding: 20px;">
+        <div class="stat-grid" id="fileStatsGrid">
+            <!-- Populated dynamically -->
+        </div>
+        <div class="tbl-wrap">
+            <table>
+                <thead>
+                    <tr>
+                        <th>File Path</th>
+                        <th style="width: 150px;">Operations Count</th>
+                        <th style="width: 250px;">Accessing Process</th>
+                    </tr>
+                </thead>
+                <tbody id="fileStatsTbody">
+                    <tr><td colspan="3"><div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">No File operations logs found.</div></div></td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- Threat Timeline View -->
+    <div class="tab-view" id="view_timeline" style="display: none; padding: 10px 25px 25px;">
+        <div class="seq-timeline" id="seqTimeline">
+            <div class="empty-state">
+                <div class="empty-icon">📈</div>
+                <div class="empty-text">Select an agent or input a query to build a chronological threat timeline.</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Footer pagination -->
+    <div class="table-footer" id="livePagination">
+        <span id="pageInfo">Showing 0-0 of 0 events</span>
+        <div class="page-btns">
+            <button class="page-btn" id="prevBtn" onclick="prevPage()">Previous</button>
+            <button class="page-btn" id="nextBtn" onclick="nextPage()">Next</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/live_activity.js"></script>
+{% endblock %}
