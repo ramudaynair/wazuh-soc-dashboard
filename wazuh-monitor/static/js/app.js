@@ -70,7 +70,7 @@ let isSourceAvailable = true;
 function markRefreshSuccess() {
     lastSuccessfulRefresh = new Date();
     isSourceAvailable = true;
-    
+
     const banner = document.getElementById('errorBanner');
     if (banner) banner.style.display = 'none';
 
@@ -85,7 +85,7 @@ function markRefreshSuccess() {
 
 function markRefreshFailure(errorMessage) {
     isSourceAvailable = false;
-    
+
     const banner = document.getElementById('errorBanner');
     const msgEl = document.getElementById('errorMessage');
     const freshEl = document.getElementById('errorFreshness');
@@ -266,6 +266,149 @@ function closeDrawer() {
     document.body.style.overflow = '';
 }
 
+function openIncidentDrawer(inc) {
+    const overlay = document.getElementById('drawerOverlay');
+    const drawer = document.getElementById('drawer');
+    const body = document.getElementById('drawerBody');
+    if (!overlay || !drawer || !body) return;
+
+    let timelineHtml = inc.timeline.map((t, idx) => {
+        const alertData = t.alert || {};
+        const rule = alertData.rule || {};
+        const agent = alertData.agent || {};
+        const decoder = alertData.decoder || {};
+        const mitre = alertData.mitre || {};
+        const groups = (rule.groups || []);
+        const rawJson = JSON.stringify(alertData.raw || alertData, null, 2);
+
+        let badgeClass = "badge-info";
+        const level = parseInt(rule.level) || 0;
+        if (level >= 15) badgeClass = "badge-critical";
+        else if (level >= 12) badgeClass = "badge-high";
+        else if (level >= 7) badgeClass = "badge-medium";
+        else if (level >= 4) badgeClass = "badge-low";
+
+        return `
+        <div class="timeline-item" style="border-left: 2px solid var(--border); padding-left: 20px; margin-bottom: 20px; position: relative;">
+            <div style="width: 10px; height: 10px; border-radius: 50%; background: var(--wazuh); position: absolute; left: -6px; top: 4px; border: 2px solid var(--surface);"></div>
+            
+            <div class="timeline-header" onclick="toggleTimelineEvent(${idx})" style="cursor: pointer; display: flex; align-items: center; justify-content: space-between; user-select: none;">
+                <div>
+                    <span style="font-size: 11px; color: var(--hint); display: block; margin-bottom: 2px;">${formatTime(t.timestamp)}</span>
+                    <span style="color: var(--text); font-weight: 500; font-size: 13px;">${escapeHtml(t.description || 'Alert Match')}</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="badge ${badgeClass}" style="font-size: 9px; padding: 1px 6px;">Lvl ${level}</span>
+                    <span id="chevron-${idx}" style="font-size: 12px; color: var(--hint); transition: transform 0.2s;">▶</span>
+                </div>
+            </div>
+
+            <div id="details-${idx}" class="timeline-event-details" style="display: none; margin-top: 12px; padding: 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 6px; font-size: 12px;">
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
+                    <div>
+                        <span style="font-size: 10px; text-transform: uppercase; color: var(--hint); font-weight: 600; display: block;">Rule ID</span>
+                        <span class="rule-id" style="font-size: 11px;">${escapeHtml(String(rule.id || '—'))}</span>
+                    </div>
+                    <div>
+                        <span style="font-size: 10px; text-transform: uppercase; color: var(--hint); font-weight: 600; display: block;">Decoder</span>
+                        <span class="mono" style="color: var(--text);">${escapeHtml(decoder.name || '—')}</span>
+                    </div>
+                    <div>
+                        <span style="font-size: 10px; text-transform: uppercase; color: var(--hint); font-weight: 600; display: block;">Agent</span>
+                        <span style="color: var(--text);">${escapeHtml(agent.name || 'manager')} (${escapeHtml(agent.ip || '127.0.0.1')})</span>
+                    </div>
+                    <div>
+                        <span style="font-size: 10px; text-transform: uppercase; color: var(--hint); font-weight: 600; display: block;">Groups</span>
+                        <span style="color: var(--text);">${groups.map(g => `<span class="group-tag" style="font-size: 9px; padding: 1px 4px;">${escapeHtml(g)}</span>`).join(' ') || '—'}</span>
+                    </div>
+                </div>
+
+                ${mitre.id ? `
+                <div style="margin-bottom: 12px;">
+                    <span style="font-size: 10px; text-transform: uppercase; color: var(--hint); font-weight: 600; display: block;">MITRE ATT&CK</span>
+                    <span style="color: var(--yellow);">${escapeHtml(mitre.id)} — ${escapeHtml(mitre.tactic)}</span>
+                </div>
+                ` : ''}
+
+                <div style="margin-bottom: 12px;">
+                    <span style="font-size: 10px; text-transform: uppercase; color: var(--hint); font-weight: 600; display: block;">Description</span>
+                    <span style="color: var(--muted);">${escapeHtml(rule.description || '—')}</span>
+                </div>
+
+                <div style="margin-top: 10px;">
+                    <button class="page-btn" onclick="toggleRawEvent(${idx})" style="padding: 3px 8px; font-size: 10px; border-color: var(--border2);">Show Raw Event</button>
+                    <pre id="raw-${idx}" class="drawer-raw" style="display: none; margin-top: 10px; max-height: 200px; overflow-y: auto; font-size: 11px; padding: 8px; background: #090d13; border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-family: monospace;">${escapeHtml(rawJson)}</pre>
+                </div>
+            </div>
+        </div>
+        `;
+    }).join("");
+
+    body.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:20px; padding:20px;">
+            <div>
+                <h3 style="font-size:16px; font-weight:600; color:var(--text); margin-bottom:6px;">${inc.title}</h3>
+                <span class="badge ${inc.severity === 'Critical' ? 'badge-critical' : inc.severity === 'High' ? 'badge-high' : 'badge-medium'}">${inc.severity} Severity</span>
+            </div>
+            
+            <div>
+                <span style="font-size:11px; text-transform:uppercase; color:var(--hint); font-weight:600;">Affected Host</span>
+                <div style="font-size:14px; font-weight:600; color:var(--text); margin-top:3px;">${inc.host}</div>
+            </div>
+
+            <div>
+                <span style="font-size:11px; text-transform:uppercase; color:var(--hint); font-weight:600;">Incident ID</span>
+                <div class="mono" style="font-size:12px; margin-top:3px; background:var(--panel2); padding:4px 8px; border-radius:4px;">${inc.id}</div>
+            </div>
+
+            <div>
+                <span style="font-size:11px; text-transform:uppercase; color:var(--hint); font-weight:600; display:block; margin-bottom:10px;">Timeline & Triggering Events</span>
+                <div style="margin-top:5px; padding-left:5px;">
+                    ${timelineHtml}
+                </div>
+            </div>
+
+            <div style="background:rgba(88,166,255,0.05); border:1px dashed var(--blue); padding:15px; border-radius:6px; margin-top:10px;">
+                <span style="font-size:11px; text-transform:uppercase; color:var(--blue); font-weight:600; display:block; margin-bottom:6px;">Recommended Action</span>
+                <div style="font-size:12px; color:var(--text); line-height:1.5;">${inc.recommendation}</div>
+            </div>
+        </div>
+    `;
+
+    overlay.classList.add('open');
+    drawer.classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+
+window.toggleTimelineEvent = function(idx) {
+    const el = document.getElementById(`details-${idx}`);
+    const chev = document.getElementById(`chevron-${idx}`);
+    if (!el) return;
+    if (el.style.display === "none") {
+        el.style.display = "block";
+        if (chev) {
+            chev.innerText = "▼";
+            chev.style.transform = "rotate(90deg)";
+        }
+    } else {
+        el.style.display = "none";
+        if (chev) {
+            chev.innerText = "▶";
+            chev.style.transform = "none";
+        }
+    }
+};
+
+window.toggleRawEvent = function(idx) {
+    const el = document.getElementById(`raw-${idx}`);
+    if (!el) return;
+    if (el.style.display === "none") {
+        el.style.display = "block";
+    } else {
+        el.style.display = "none";
+    }
+};
+
 
 /* ── Formatters ────────────────────────────────────────────────── */
 
@@ -302,8 +445,8 @@ function levelBadge(level) {
     const lv = parseInt(level) || 0;
     if (lv >= 15) return `<span class="badge badge-critical">Critical ${lv}</span>`;
     if (lv >= 12) return `<span class="badge badge-high">High ${lv}</span>`;
-    if (lv >= 7)  return `<span class="badge badge-medium">Medium ${lv}</span>`;
-    if (lv >= 4)  return `<span class="badge badge-low">Low ${lv}</span>`;
+    if (lv >= 7) return `<span class="badge badge-medium">Medium ${lv}</span>`;
+    if (lv >= 4) return `<span class="badge badge-low">Low ${lv}</span>`;
     return `<span class="badge badge-info">Info ${lv}</span>`;
 }
 
@@ -311,8 +454,8 @@ function levelClass(level) {
     const lv = parseInt(level) || 0;
     if (lv >= 15) return 'critical';
     if (lv >= 12) return 'high';
-    if (lv >= 7)  return 'medium';
-    if (lv >= 4)  return 'low';
+    if (lv >= 7) return 'medium';
+    if (lv >= 4) return 'low';
     return 'info';
 }
 

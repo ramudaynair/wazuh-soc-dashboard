@@ -2,14 +2,7 @@
 app.py — Wazuh Monitor SOC Dashboard
 
 Flask application that proxies all Wazuh API calls, serves the frontend,
-and exposes clean internal REST endpoints.  The browser NEVER communicates
-directly with the Wazuh API.
-
-Usage (development):
-    python app.py
-
-Usage (production):
-    gunicorn -w 4 -b 0.0.0.0:5000 app:app
+and exposes clean internal REST endpoints.
 """
 
 import json
@@ -19,16 +12,14 @@ import logging
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, jsonify
 
-# ── Load .env ───────────────────────────────────────────────────
+# Load .env
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(BASE_DIR, ".env"))
 
-load_dotenv(os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"))
-
-from services.auth_service import auth
-from services.wazuh_service import (
-    get_stats, get_agents, get_agent, get_agent_summary,
-    get_alerts, get_manager_info, get_groups,
-    read_security_alerts, get_security_summary_stats, get_consolidated_applications,
-)
+import config
+from services.wazuh_service import wazuh_service
+from services.incident_service import incident_service
+from services.dashboard_service import get_dashboard_data
 from services.cache_service import cache
 
 # ── Logging ─────────────────────────────────────────────────────
@@ -42,9 +33,6 @@ log = logging.getLogger("wazuh-monitor")
 
 # ── Flask App ───────────────────────────────────────────────────
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CONFIG_PATH = os.path.join(BASE_DIR, "config.json")
-
 app = Flask(
     __name__,
     template_folder=os.path.join(BASE_DIR, "templates"),
@@ -53,77 +41,45 @@ app = Flask(
 app.config["JSON_SORT_KEYS"] = False
 
 
-# ── Config helpers ──────────────────────────────────────────────
-
-def load_config():
-    """Read config.json and return as dict."""
-    try:
-        with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except FileNotFoundError:
-        log.warning("config.json not found — using defaults")
-        return {
-            "wazuh": {"api_url": "", "username": "", "password": "", "verify_ssl": False},
-            "dashboard": {"refresh_interval": 30, "theme": "dark", "page_size": 20},
-            "managers": [],
-        }
-
-
-def save_config(cfg):
-    """Persist config dict to config.json."""
-    with open(CONFIG_PATH, "w", encoding="utf-8") as fh:
-        json.dump(cfg, fh, indent=4)
-
-
 def init_auth_from_config():
-    """Configure the auth service from environment variables (.env)."""
-    api_url = os.environ.get("WAZUH_API_URL", "").rstrip("/")
-    username = os.environ.get("WAZUH_USERNAME", "")
-    password = os.environ.get("WAZUH_PASSWORD", "")
-    verify_env = os.environ.get("WAZUH_VERIFY_SSL", "false")
-    verify = verify_env.lower() in ("true", "1", "yes")
-
-    if api_url and username and password:
-        auth.configure(api_url, username, password, verify)
-        log.info("Auth configured for %s (credentials from .env)", api_url)
-        # Attempt silent connect
-        try:
-            if auth.authenticate():
-                log.info("Auto-connected to Wazuh on startup")
-            else:
-                log.warning("Auto-connect failed: %s", auth.last_error)
-        except Exception as exc:
-            log.warning("Auto-connect failed with exception: %s", exc)
-    else:
-        log.warning("Auth NOT configured — set WAZUH_API_URL, WAZUH_USERNAME, WAZUH_PASSWORD in .env  "
-                    "(api_url: %s, username: %s, password set: %s)",
-                    bool(api_url), bool(username), bool(password))
+    """Initialize the Wazuh service and attempt silent login on startup."""
+    try:
+        if wazuh_service.login():
+            log.info("Auto-connected to Wazuh on startup")
+        else:
+            log.warning("Auto-connect failed: %s", wazuh_service.last_error)
+    except Exception as exc:
+        log.warning("Auto-connect failed with exception: %s", exc)
 
 
 # ── Page routes ─────────────────────────────────────────────────
 
 @app.route("/")
 def page_dashboard():
-    cfg = load_config()
     return render_template("dashboard.html",
                            page="dashboard",
-                           refresh_interval=cfg.get("dashboard", {}).get("refresh_interval", 30))
+                           refresh_interval=config.REFRESH_INTERVAL)
+
+
+@app.route("/incidents")
+def page_incidents():
+    return render_template("incidents.html",
+                           page="incidents",
+                           page_size=config.PAGE_SIZE)
 
 
 @app.route("/logs")
 def page_logs():
-    cfg = load_config()
     return render_template("logs.html",
                            page="logs",
-                           page_size=cfg.get("dashboard", {}).get("page_size", 20))
+                           page_size=config.PAGE_SIZE)
 
 
 @app.route("/agents")
 def page_agents():
-    cfg = load_config()
     return render_template("agents.html",
                            page="agents",
-                           page_size=cfg.get("dashboard", {}).get("page_size", 20))
+                           page_size=config.PAGE_SIZE)
 
 
 @app.route("/agents/<agent_id>")
@@ -138,21 +94,16 @@ def page_settings():
 
 @app.route("/authentication")
 def page_authentication():
-    cfg = load_config()
     return render_template("authentication.html",
                            page="authentication",
-                           page_size=cfg.get("dashboard", {}).get("page_size", 20))
+                           page_size=config.PAGE_SIZE)
 
 
 @app.route("/applications")
 def page_applications():
-    cfg = load_config()
     return render_template("applications.html",
                            page="applications",
-                           page_size=cfg.get("dashboard", {}).get("page_size", 20))
-
-
-
+                           page_size=config.PAGE_SIZE)
 
 
 # ── API: Connection ─────────────────────────────────────────────
@@ -160,7 +111,7 @@ def page_applications():
 @app.route("/api/status")
 def api_status():
     """Return current connection status (no secrets)."""
-    return jsonify(auth.status())
+    return jsonify(wazuh_service.status())
 
 
 @app.route("/api/connect", methods=["POST"])
@@ -174,19 +125,21 @@ def api_connect():
     verify = body.get("verify_ssl", False)
 
     if api_url and username and password:
-        auth.configure(api_url, username, password, verify)
-    elif not auth.is_configured:
-        return jsonify({"error": "No credentials provided or configured"}), 400
+        wazuh_service.host = api_url.rstrip("/")
+        wazuh_service.username = username
+        wazuh_service.password = password
+        wazuh_service.verify_ssl = verify
 
-    if auth.authenticate():
-        return jsonify({"success": True, "status": auth.status()})
+    if wazuh_service.login():
+        return jsonify({"success": True, "status": wazuh_service.status()})
     else:
-        return jsonify({"error": auth.last_error}), 401
+        return jsonify({"error": wazuh_service.last_error}), 401
 
 
 @app.route("/api/disconnect", methods=["POST"])
 def api_disconnect():
-    auth.disconnect()
+    wazuh_service._token = None
+    wazuh_service.is_connected = False
     cache.clear()
     return jsonify({"success": True})
 
@@ -218,14 +171,91 @@ def api_test_connection():
         return jsonify({"error": str(exc)}), 500
 
 
-# ── API: Dashboard stats ───────────────────────────────────────
+# ── API: Dashboard ──────────────────────────────────────────────
+
+@app.route("/api/dashboard")
+def api_dashboard():
+    if not wazuh_service.is_connected:
+        return jsonify({"error": "Not connected"}), 401
+    try:
+        offset = request.args.get("offset", 0, type=int)
+        limit = request.args.get("limit", 10, type=int)
+        show_infra = request.args.get("show_infra", "false").lower() == "true"
+        
+        # 1. Manager Status
+        mgr_status = wazuh_service.get_manager_status()
+        
+        # 2. Agents Summary
+        summary = wazuh_service.get_agent_summary()
+        online = summary.get("active", 0)
+        offline = summary.get("disconnected", 0)
+        
+        # 3. Alerts Summary
+        stats = wazuh_service.get_stats()
+        alerts = stats.get("alerts", {})
+        
+        # 4. Vulnerabilities Summary
+        vuln_crit = 0
+        vuln_high = 0
+        try:
+            agents_res = wazuh_service.get_agents(limit=50)
+            for agent in agents_res.get("items", []):
+                if agent.get("status") == "active":
+                    vulns = wazuh_service.get_vulnerabilities(agent.get("id"), limit=100)
+                    for item in vulns.get("items", []):
+                        sev = item.get("severity", "").lower()
+                        if sev == "critical":
+                            vuln_crit += 1
+                        elif sev == "high":
+                            vuln_high += 1
+        except Exception:
+            pass
+
+        # If summary format is requested specifically
+        if request.args.get("format", "").lower() == "summary":
+            return jsonify({
+                "manager": mgr_status.get("status", "Healthy"),
+                "agents": {
+                    "online": online,
+                    "offline": offline
+                },
+                "alerts": {
+                    "critical": alerts.get("critical", 0),
+                    "high": alerts.get("high", 0)
+                },
+                "vulnerabilities": {
+                    "critical": vuln_crit,
+                    "high": vuln_high
+                }
+            })
+            
+        # Default full UI aggregated response
+        result = get_dashboard_data(limit=limit, offset=offset, show_infra=show_infra)
+        result["manager"] = mgr_status.get("status", "Healthy")
+        result["agents_summary"] = {
+            "online": online,
+            "offline": offline
+        }
+        result["alerts_summary"] = {
+            "critical": alerts.get("critical", 0),
+            "high": alerts.get("high", 0)
+        }
+        result["vulnerabilities_summary"] = {
+            "critical": vuln_crit,
+            "high": vuln_high
+        }
+        return jsonify(result)
+    except Exception as exc:
+        log.exception("Dashboard aggregation error")
+        return jsonify({"error": str(exc)}), 500
+
 
 @app.route("/api/stats")
 def api_stats():
-    if not auth.is_connected:
+    if not wazuh_service.is_connected:
         return jsonify({"error": "Not connected"}), 401
     try:
-        return jsonify(get_stats())
+        return jsonify(wazuh_service.get_stats())
     except Exception as exc:
         log.exception("Stats error")
         return jsonify({"error": str(exc)}), 500
@@ -235,7 +265,7 @@ def api_stats():
 
 @app.route("/api/agents")
 def api_agents():
-    if not auth.is_connected:
+    if not wazuh_service.is_connected:
         return jsonify({"error": "Not connected"}), 401
     try:
         offset = request.args.get("offset", 0, type=int)
@@ -244,8 +274,8 @@ def api_agents():
         status = request.args.get("status", None)
         group = request.args.get("group", None)
         sort = request.args.get("sort", None)
-        result = get_agents(offset=offset, limit=limit, search=search,
-                            status=status, group=group, sort=sort)
+        result = wazuh_service.get_agents(offset=offset, limit=limit, search=search,
+                                          status=status, group=group, sort=sort)
         return jsonify(result)
     except Exception as exc:
         log.exception("Agents error")
@@ -254,10 +284,10 @@ def api_agents():
 
 @app.route("/api/agents/<agent_id>")
 def api_agent_detail(agent_id):
-    if not auth.is_connected:
+    if not wazuh_service.is_connected:
         return jsonify({"error": "Not connected"}), 401
     try:
-        agent = get_agent(agent_id)
+        agent = wazuh_service.get_agent(agent_id)
         if agent:
             return jsonify(agent)
         return jsonify({"error": "Agent not found"}), 404
@@ -266,40 +296,55 @@ def api_agent_detail(agent_id):
         return jsonify({"error": str(exc)}), 500
 
 
-# ── API: Alerts / logs ─────────────────────────────────────────
+# ── API: Incidents ──────────────────────────────────────────────
 
-@app.route("/api/alerts")
-def api_alerts():
-    if not auth.is_connected:
+@app.route("/api/incidents")
+def api_incidents():
+    if not wazuh_service.is_connected:
         return jsonify({"error": "Not connected"}), 401
     try:
         offset = request.args.get("offset", 0, type=int)
         limit = request.args.get("limit", 20, type=int)
-        level = request.args.get("level", None)
-        search = request.args.get("search", None)
-        agent = request.args.get("agent", None)
-        result = read_security_alerts(offset=offset, limit=limit, level=level, agent=agent,
-                                      search=search, show_infra=False)
+        result = incident_service.get_incidents(limit=limit, offset=offset)
         return jsonify(result)
     except Exception as exc:
-        log.exception("Alerts error")
+        log.exception("Incidents error")
         return jsonify({"error": str(exc)}), 500
 
 
-@app.route("/api/security/stats")
-def api_security_stats():
-    if not auth.is_connected:
+# ── API: Vulnerabilities ────────────────────────────────────────
+
+@app.route("/api/vulnerabilities")
+def api_vulnerabilities():
+    if not wazuh_service.is_connected:
         return jsonify({"error": "Not connected"}), 401
     try:
-        return jsonify(get_security_summary_stats())
+        agent_id = request.args.get("agent_id")
+        offset = request.args.get("offset", 0, type=int)
+        limit = request.args.get("limit", 20, type=int)
+        if not agent_id:
+            consolidated = []
+            agents_res = wazuh_service.get_agents(limit=50)
+            for agent in agents_res.get("items", []):
+                if agent.get("status") == "active":
+                    res = wazuh_service.get_vulnerabilities(agent.get("id"), offset=offset, limit=limit)
+                    consolidated.extend(res.get("items", []))
+            return jsonify({"items": consolidated, "total": len(consolidated)})
+        
+        result = wazuh_service.get_vulnerabilities(agent_id, offset=offset, limit=limit)
+        return jsonify(result)
     except Exception as exc:
-        log.exception("Security stats error")
+        log.exception("Vulnerabilities error")
         return jsonify({"error": str(exc)}), 500
 
 
+# ── API: Alerts / Logs ──────────────────────────────────────────
+
+@app.route("/api/alerts")
 @app.route("/api/security/alerts")
+@app.route("/api/logs")
 def api_security_alerts():
-    if not auth.is_connected:
+    if not wazuh_service.is_connected:
         return jsonify({"error": "Not connected"}), 401
     try:
         offset = request.args.get("offset", 0, type=int)
@@ -310,7 +355,7 @@ def api_security_alerts():
         category = request.args.get("category", None)
         show_infra = request.args.get("show_infra", "false").lower() == "true"
         
-        result = read_security_alerts(
+        result = wazuh_service.get_alerts(
             offset=offset, limit=limit, search=search, level=level,
             agent=agent, category=category, show_infra=show_infra
         )
@@ -320,12 +365,23 @@ def api_security_alerts():
         return jsonify({"error": str(exc)}), 500
 
 
-@app.route("/api/syscollector/applications")
-def api_syscollector_applications():
-    if not auth.is_connected:
+@app.route("/api/security/stats")
+def api_security_stats():
+    if not wazuh_service.is_connected:
         return jsonify({"error": "Not connected"}), 401
     try:
-        return jsonify({"items": get_consolidated_applications()})
+        return jsonify(wazuh_service.get_security_summary_stats())
+    except Exception as exc:
+        log.exception("Security stats error")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/syscollector/applications")
+def api_syscollector_applications():
+    if not wazuh_service.is_connected:
+        return jsonify({"error": "Not connected"}), 401
+    try:
+        return jsonify({"items": wazuh_service.get_consolidated_applications()})
     except Exception as exc:
         log.exception("Syscollector applications error")
         return jsonify({"error": str(exc)}), 500
@@ -335,10 +391,10 @@ def api_syscollector_applications():
 
 @app.route("/api/manager/info")
 def api_manager_info():
-    if not auth.is_connected:
+    if not wazuh_service.is_connected:
         return jsonify({"error": "Not connected"}), 401
     try:
-        return jsonify(get_manager_info())
+        return jsonify(wazuh_service.get_manager_status())
     except Exception as exc:
         log.exception("Manager info error")
         return jsonify({"error": str(exc)}), 500
@@ -348,11 +404,28 @@ def api_manager_info():
 
 @app.route("/api/groups")
 def api_groups():
-    if not auth.is_connected:
+    if not wazuh_service.is_connected:
         return jsonify({"error": "Not connected"}), 401
     try:
-        return jsonify({"groups": get_groups()})
+        res = wazuh_service._get("/groups", cache_key="groups_list", cache_ttl=120)
+        return jsonify({"groups": res.get("data", {}).get("affected_items", [])})
     except Exception as exc:
+        return jsonify({"error": str(exc)}), 500
+
+
+# ── API: Search ─────────────────────────────────────────────────
+
+@app.route("/api/search")
+def api_search():
+    if not wazuh_service.is_connected:
+        return jsonify({"error": "Not connected"}), 401
+    try:
+        query = request.args.get("q", "")
+        limit = request.args.get("limit", 50, type=int)
+        result = wazuh_service.search(query, limit=limit)
+        return jsonify(result)
+    except Exception as exc:
+        log.exception("Search error")
         return jsonify({"error": str(exc)}), 500
 
 
@@ -361,50 +434,62 @@ def api_groups():
 @app.route("/api/settings")
 def api_get_settings():
     """Return settings with password redacted."""
-    cfg = load_config()
-    # Redact passwords
-    if cfg.get("wazuh", {}).get("password"):
-        cfg["wazuh"]["password"] = "••••••••"
-    for mgr in cfg.get("managers", []):
-        if mgr.get("password"):
-            mgr["password"] = "••••••••"
-    return jsonify(cfg)
+    return jsonify({
+        "wazuh": {
+            "api_url": wazuh_service.host,
+            "username": wazuh_service.username,
+            "password": "••••••••",
+            "verify_ssl": wazuh_service.verify_ssl
+        },
+        "dashboard": {
+            "refresh_interval": config.REFRESH_INTERVAL,
+            "theme": config.THEME,
+            "page_size": config.PAGE_SIZE
+        }
+    })
 
 
 @app.route("/api/settings", methods=["POST"])
 def api_save_settings():
-    """Save settings.  If password is the redaction mask, keep existing."""
     body = request.get_json(silent=True) or {}
-    current = load_config()
 
-    # Merge wazuh section
     wz = body.get("wazuh", {})
-    if wz:
-        if wz.get("password") in ("••••••••", ""):
-            wz["password"] = current.get("wazuh", {}).get("password", "")
-        current["wazuh"] = {**current.get("wazuh", {}), **wz}
-
-    # Merge dashboard section
     dash = body.get("dashboard", {})
+
+    host = wz.get("api_url", wazuh_service.host)
+    username = wz.get("username", wazuh_service.username)
+    password = wz.get("password", "")
+    if password in ("••••••••", ""):
+        password = wazuh_service.password
+    verify = wz.get("verify_ssl", wazuh_service.verify_ssl)
+
+    env_content = f"""WAZUH_HOST={host}
+WAZUH_USERNAME={username}
+WAZUH_PASSWORD={password}
+VERIFY_SSL={str(verify).lower()}
+"""
+    try:
+        env_path = os.path.join(BASE_DIR, ".env")
+        with open(env_path, "w", encoding="utf-8") as f:
+            f.write(env_content)
+    except Exception as exc:
+        return jsonify({"error": f"Failed to save settings: {exc}"}), 500
+
+    config.HOST = host
+    config.USERNAME = username
+    config.PASSWORD = password
+    config.VERIFY_SSL = verify
+    
     if dash:
-        current["dashboard"] = {**current.get("dashboard", {}), **dash}
+        config.REFRESH_INTERVAL = int(dash.get("refresh_interval", config.REFRESH_INTERVAL))
+        config.THEME = dash.get("theme", config.THEME)
+        config.PAGE_SIZE = int(dash.get("page_size", config.PAGE_SIZE))
 
-    # Merge managers
-    mgrs = body.get("managers")
-    if mgrs is not None:
-        for mgr in mgrs:
-            if mgr.get("password") in ("••••••••", ""):
-                # Find matching existing manager and keep password
-                for existing in current.get("managers", []):
-                    if existing.get("name") == mgr.get("name"):
-                        mgr["password"] = existing.get("password", "")
-                        break
-        current["managers"] = mgrs
-
-    save_config(current)
-
-    # Re-init auth if wazuh section changed
-    init_auth_from_config()
+    wazuh_service.host = host.rstrip("/")
+    wazuh_service.username = username
+    wazuh_service.password = password
+    wazuh_service.verify_ssl = verify
+    wazuh_service.login()
 
     return jsonify({"success": True})
 
@@ -414,13 +499,11 @@ def api_save_settings():
 @app.route("/api/cache/clear", methods=["POST"])
 def api_cache_clear():
     cache.clear()
-    # Also reset the in-memory alerts cache so the next request
-    # triggers a full re-parse (picks up any updated dedup logic)
-    from services.wazuh_service import _alerts_cache, _alerts_cache_lock
-    with _alerts_cache_lock:
-        _alerts_cache["size"] = 0
-        _alerts_cache["last_pos"] = 0
-        _alerts_cache["parsed_events"] = []
+    from services.wazuh_service import wazuh_service
+    with wazuh_service._alerts_cache_lock:
+        wazuh_service._alerts_cache["size"] = 0
+        wazuh_service._alerts_cache["last_pos"] = 0
+        wazuh_service._alerts_cache["parsed_events"] = []
     return jsonify({"success": True})
 
 
@@ -430,7 +513,7 @@ def api_cache_clear():
 def not_found(e):
     if request.path.startswith("/api/"):
         return jsonify({"error": "Not found"}), 404
-    return render_template("dashboard.html", page="dashboard", refresh_interval=30), 404
+    return render_template("dashboard.html", page="dashboard", refresh_interval=config.REFRESH_INTERVAL), 404
 
 
 @app.errorhandler(500)
@@ -444,5 +527,3 @@ init_auth_from_config()
 if __name__ == "__main__":
     log.info("Starting Wazuh Monitor on http://0.0.0.0:5000")
     app.run(host="0.0.0.0", port=5000, debug=True)
-
-
