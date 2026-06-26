@@ -41,83 +41,90 @@ function refreshPage() {
 
 async function loadDashboard() {
     try {
-        await Promise.all([
-            loadStats(),
-            loadAgentHealth(),
-            loadRecentEvents(),
-        ]);
+        const showInfra = document.getElementById('showInfraToggle')?.checked || false;
+        if (lastShowInfra !== null && lastShowInfra !== showInfra) {
+            currentPage = 1;
+        }
+        lastShowInfra = showInfra;
+
+        const offset = (currentPage - 1) * pageSize;
+        const data = await api(`/api/dashboard?limit=${pageSize}&offset=${offset}&show_infra=${showInfra}`);
+
+        updateStatsUI(data.stats || {}, data.security || {});
+        updateAgentHealthUI(data.agents || []);
+        updateRecentEventsUI(data.latest_alerts || [], data.latest_alerts_total || 0);
+
         markRefreshSuccess();
     } catch (err) {
         markRefreshFailure(err.message || 'Wazuh Connection Lost');
+        clearUIOnFailure();
     }
 }
 
+// Map old loaders to loadDashboard to avoid breaking any other triggers/callbacks
+async function loadStats() { return loadDashboard(); }
+async function loadAgentHealth() { return loadDashboard(); }
+async function loadRecentEvents() { return loadDashboard(); }
 
-/* ── Stats ─────────────────────────────────────────────────────── */
+function updateStatsUI(data, secStats) {
+    const agents = data.agents || {};
+    const alerts = data.alerts || {};
 
-async function loadStats() {
-    try {
-        const [data, secStats] = await Promise.all([
-            api('/api/stats'),
-            api('/api/security/stats')
-        ]);
-        
-        const agents = data.agents || {};
-        const alerts = data.alerts || {};
+    const elTotal = document.getElementById('statTotal');
+    if (elTotal) elTotal.textContent = agents.total || 0;
+    const elOnline = document.getElementById('statOnline');
+    if (elOnline) elOnline.textContent = agents.active || 0;
+    const elOffline = document.getElementById('statOffline');
+    if (elOffline) elOffline.textContent = agents.disconnected || 0;
 
-        document.getElementById('statTotal').textContent = agents.total || 0;
-        document.getElementById('statOnline').textContent = agents.active || 0;
-        document.getElementById('statOffline').textContent = agents.disconnected || 0;
+    // Populate Security stats
+    const sumFailedLogins = document.getElementById('sumFailedLogins');
+    if (sumFailedLogins) sumFailedLogins.textContent = secStats.failed_logins || 0;
+    const sumSoftwareChanges = document.getElementById('sumSoftwareChanges');
+    if (sumSoftwareChanges) sumSoftwareChanges.textContent = secStats.software_changes || 0;
+    const sumMalwareAlerts = document.getElementById('sumMalwareAlerts');
+    if (sumMalwareAlerts) sumMalwareAlerts.textContent = secStats.malware_alerts || 0;
+    const sumOfflineEndpoints = document.getElementById('sumOfflineEndpoints');
+    if (sumOfflineEndpoints) sumOfflineEndpoints.textContent = secStats.offline_endpoints || 0;
 
-        // Populate Security stats
-        document.getElementById('sumFailedLogins').textContent = secStats.failed_logins || 0;
-        document.getElementById('sumSoftwareChanges').textContent = secStats.software_changes || 0;
-        document.getElementById('sumMalwareAlerts').textContent = secStats.malware_alerts || 0;
-        document.getElementById('sumOfflineEndpoints').textContent = secStats.offline_endpoints || 0;
+    const cardSecurityAlerts = document.getElementById('cardSecurityAlerts');
+    if (cardSecurityAlerts) cardSecurityAlerts.textContent = alerts.total || 0;
+    const cardFailedLogins = document.getElementById('cardFailedLogins');
+    if (cardFailedLogins) cardFailedLogins.textContent = secStats.failed_logins || 0;
+    const cardSoftwareChanges = document.getElementById('cardSoftwareChanges');
+    if (cardSoftwareChanges) cardSoftwareChanges.textContent = secStats.software_changes || 0;
+    const cardMalwareAlerts = document.getElementById('cardMalwareAlerts');
+    if (cardMalwareAlerts) cardMalwareAlerts.textContent = secStats.malware_alerts || 0;
 
-        document.getElementById('cardSecurityAlerts').textContent = alerts.total || 0;
-        document.getElementById('cardFailedLogins').textContent = secStats.failed_logins || 0;
-        document.getElementById('cardSoftwareChanges').textContent = secStats.software_changes || 0;
-        document.getElementById('cardMalwareAlerts').textContent = secStats.malware_alerts || 0;
+    const statTotalSub = document.getElementById('statTotalSub');
+    if (statTotalSub) {
+        statTotalSub.textContent = `${agents.pending || 0} pending, ${agents.never_connected || 0} never connected`;
+    }
+    const statOfflineSub = document.getElementById('statOfflineSub');
+    if (statOfflineSub) {
+        statOfflineSub.textContent = agents.disconnected > 0 ? 'Requires attention' : 'All agents online';
+    }
 
-        document.getElementById('statTotalSub').textContent =
-            `${agents.pending || 0} pending, ${agents.never_connected || 0} never connected`;
-        document.getElementById('statOfflineSub').textContent =
-            agents.disconnected > 0 ? 'Requires attention' : 'All agents online';
-
-        // Offline banner
-        const banner = document.getElementById('offlineBanner');
+    // Offline banner
+    const banner = document.getElementById('offlineBanner');
+    if (banner) {
         if (agents.disconnected > 0) {
             banner.classList.remove('hidden');
-            document.getElementById('offlineBannerText').innerHTML =
-                `⚠ ${agents.disconnected} Agent${agents.disconnected > 1 ? 's' : ''} Offline <span>Immediate attention required</span>`;
+            const textEl = document.getElementById('offlineBannerText');
+            if (textEl) {
+                textEl.innerHTML = `⚠ ${agents.disconnected} Agent${agents.disconnected > 1 ? 's' : ''} Offline <span>Immediate attention required</span>`;
+            }
         } else {
             banner.classList.add('hidden');
         }
-
-        // Cache data for charts
-        _lastAlerts = alerts;
-        _lastTopSources = data.top_sources || [];
-
-        // Build severity bars & charts from real data
-        updateSeverityBars(alerts);
-
-    } catch (err) {
-        const ids = [
-            'statTotal', 'statOnline', 'statOffline',
-            'sumFailedLogins', 'sumSoftwareChanges', 'sumMalwareAlerts', 'sumOfflineEndpoints',
-            'cardSecurityAlerts', 'cardFailedLogins', 'cardSoftwareChanges', 'cardMalwareAlerts'
-        ];
-        ids.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) el.textContent = '—';
-        });
-        const sub1 = document.getElementById('statTotalSub');
-        if (sub1) sub1.textContent = 'Sync offline';
-        const sub2 = document.getElementById('statOfflineSub');
-        if (sub2) sub2.textContent = 'Sync offline';
-        throw err;
     }
+
+    // Cache data for charts
+    _lastAlerts = alerts;
+    _lastTopSources = data.top_sources || [];
+
+    // Build severity bars & charts from real data
+    updateSeverityBars(alerts);
 }
 
 function updateSeverityBars(alerts) {
@@ -298,104 +305,107 @@ function updateTopAgentsChart(topSources) {
 
 /* ── Agent Health Grid ─────────────────────────────────────────── */
 
-async function loadAgentHealth() {
-    try {
-        const data = await api('/api/agents?limit=50');
-        const agents = data.items || [];
-        const grid = document.getElementById('agentHealthGrid');
-        const badge = document.getElementById('agentHealthCount');
+function updateAgentHealthUI(agents) {
+    const grid = document.getElementById('agentHealthGrid');
+    const badge = document.getElementById('agentHealthCount');
 
-        badge.textContent = `${data.total || agents.length} agents`;
+    if (badge) badge.textContent = `${agents.length} agents`;
 
-        if (!agents.length) {
-            grid.innerHTML = '<div class="empty-state"><div class="empty-icon">🖥</div><div class="empty-text">No agents found</div></div>';
-            return;
-        }
+    if (!grid) return;
 
-        grid.innerHTML = agents.map(a => {
-            const st = a.status || 'never_connected';
-            const cardClass = st === 'active' ? 'online' : st === 'disconnected' ? 'offline' : 'warning';
-            return `
-                <div class="agent-health-card ${cardClass}" onclick="window.location.href='/agents/${a.id}'">
-                    <div class="agent-name">${escapeHtml(a.name || '—')}</div>
-                    <div class="agent-ip">${escapeHtml(a.ip || '—')}</div>
-                    <div class="agent-meta">
-                        ${statusBadge(st)}
-                        <span class="agent-last-seen">${formatRelative(a.lastKeepAlive)}</span>
-                    </div>
-                </div>`;
-        }).join('');
-    } catch (err) {
-        const grid = document.getElementById('agentHealthGrid');
-        const badge = document.getElementById('agentHealthCount');
-        if (badge) badge.textContent = '—';
-        if (grid) {
-            grid.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-icon" style="color:var(--red)">⚠️</div>
-                    <div class="empty-text" style="color:var(--red)">Connection lost: unable to fetch agent inventory</div>
-                </div>`;
-        }
-        throw err;
+    if (!agents.length) {
+        grid.innerHTML = '<div class="empty-state"><div class="empty-icon">🖥</div><div class="empty-text">No agents found</div></div>';
+        return;
     }
+
+    grid.innerHTML = agents.map(a => {
+        const st = a.status || 'never_connected';
+        const cardClass = st === 'active' ? 'online' : st === 'disconnected' ? 'offline' : 'warning';
+        return `
+            <div class="agent-health-card ${cardClass}" onclick="window.location.href='/agents/${a.id}'">
+                <div class="agent-name">${escapeHtml(a.name || '—')}</div>
+                <div class="agent-ip">${escapeHtml(a.ip || '—')}</div>
+                <div class="agent-meta">
+                    ${statusBadge(st)}
+                    <span class="agent-last-seen">${formatRelative(a.lastKeepAlive)}</span>
+                </div>
+            </div>`;
+    }).join('');
 }
 
 
 /* ── Recent Events ─────────────────────────────────────────────── */
 
-async function loadRecentEvents() {
-    try {
-        const showInfra = document.getElementById('showInfraToggle')?.checked || false;
-        if (lastShowInfra !== null && lastShowInfra !== showInfra) {
-            currentPage = 1;
-        }
-        lastShowInfra = showInfra;
+function updateRecentEventsUI(items, total) {
+    totalItems = total;
+    const tbody = document.getElementById('recentEventsTbody');
+    const badge = document.getElementById('recentEventCount');
 
-        const offset = (currentPage - 1) * pageSize;
-        const data = await api(`/api/security/alerts?limit=${pageSize}&offset=${offset}&show_infra=${showInfra}`);
-        const items = data.items || [];
-        totalItems = data.total || 0;
-        const tbody = document.getElementById('recentEventsTbody');
-        const badge = document.getElementById('recentEventCount');
+    if (badge) badge.textContent = `${totalItems} events`;
 
-        badge.textContent = `${totalItems} events`;
+    if (!tbody) return;
 
-        if (!items.length) {
-            tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">No recent events</div></div></td></tr>';
-            updatePaginationUI();
-            return;
-        }
-
-        tbody.innerHTML = items.map(a => {
-            const rule = a.rule || {};
-            const agent = a.agent || {};
-            return `
-                <tr onclick='openDrawer(${JSON.stringify(a).replace(/'/g, "&#39;")})'>
-                    <td>${levelBadge(rule.level)}</td>
-                    <td class="primary">${escapeHtml(agent.name || 'manager')}</td>
-                    <td><span class="rule-id">${escapeHtml(String(rule.id || '—'))}</span></td>
-                    <td class="primary" style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(rule.description || '')}">${escapeHtml(rule.description || '—')}</td>
-                    <td class="mono">${formatTime(a.timestamp)}</td>
-                </tr>`;
-        }).join('');
-
+    if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">No recent events</div></div></td></tr>';
         updatePaginationUI();
-    } catch (err) {
-        const tbody = document.getElementById('recentEventsTbody');
-        const badge = document.getElementById('recentEventCount');
-        if (badge) badge.textContent = '—';
-        if (tbody) {
-            tbody.innerHTML = `
-                <tr>
-                    <td colspan="5">
-                        <div class="empty-state">
-                            <div class="empty-icon" style="color:var(--red)">⚠️</div>
-                            <div class="empty-text" style="color:var(--red)">Connection lost: unable to fetch security events log</div>
-                        </div>
-                    </td>
-                </tr>`;
-        }
-        throw err;
+        return;
+    }
+
+    tbody.innerHTML = items.map(a => {
+        const rule = a.rule || {};
+        const agent = a.agent || {};
+        return `
+            <tr onclick='openDrawer(${JSON.stringify(a).replace(/'/g, "&#39;")})'>
+                <td>${levelBadge(rule.level)}</td>
+                <td class="primary">${escapeHtml(agent.name || 'manager')}</td>
+                <td><span class="rule-id">${escapeHtml(String(rule.id || '—'))}</span></td>
+                <td class="primary" style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(rule.description || '')}">${escapeHtml(rule.description || '—')}</td>
+                <td class="mono">${formatTime(a.timestamp)}</td>
+            </tr>`;
+    }).join('');
+
+    updatePaginationUI();
+}
+
+function clearUIOnFailure() {
+    const ids = [
+        'statTotal', 'statOnline', 'statOffline',
+        'sumFailedLogins', 'sumSoftwareChanges', 'sumMalwareAlerts', 'sumOfflineEndpoints',
+        'cardSecurityAlerts', 'cardFailedLogins', 'cardSoftwareChanges', 'cardMalwareAlerts'
+    ];
+    ids.forEach(id => {
+        const el = document.getElementById(id);
+        if (el) el.textContent = '—';
+    });
+    const sub1 = document.getElementById('statTotalSub');
+    if (sub1) sub1.textContent = 'Sync offline';
+    const sub2 = document.getElementById('statOfflineSub');
+    if (sub2) sub2.textContent = 'Sync offline';
+
+    const grid = document.getElementById('agentHealthGrid');
+    const badgeAgents = document.getElementById('agentHealthCount');
+    if (badgeAgents) badgeAgents.textContent = '—';
+    if (grid) {
+        grid.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-icon" style="color:var(--red)">⚠️</div>
+                <div class="empty-text" style="color:var(--red)">Connection lost: unable to fetch agent inventory</div>
+            </div>`;
+    }
+
+    const tbody = document.getElementById('recentEventsTbody');
+    const badgeEvents = document.getElementById('recentEventCount');
+    if (badgeEvents) badgeEvents.textContent = '—';
+    if (tbody) {
+        tbody.innerHTML = `
+            <tr>
+                <td colspan="5">
+                    <div class="empty-state">
+                        <div class="empty-icon" style="color:var(--red)">⚠️</div>
+                        <div class="empty-text" style="color:var(--red)">Connection lost: unable to fetch security events log</div>
+                    </div>
+                </td>
+            </tr>`;
     }
 }
 
