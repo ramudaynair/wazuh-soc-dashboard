@@ -33,6 +33,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initial load
     loadLogs();
+
+    // Auto-refresh every 30 seconds
+    if (typeof startAutoRefresh === 'function') {
+        startAutoRefresh(30, () => {
+            loadLogs();
+        });
+    }
 });
 
 async function loadLogs() {
@@ -139,5 +146,9 @@ function resetFilters() {
     document.getElementById('levelFilter').value = '';
     document.getElementById('searchInput').value = '';
     currentPage = 1;
+    loadLogs();
+}
+
+function refreshPage() {
     loadLogs();
 }

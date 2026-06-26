@@ -7,11 +7,15 @@
 
 async function api(path, options = {}) {
     const url = path.startsWith('/') ? path : '/' + path;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
     try {
         const resp = await fetch(url, {
             headers: { 'Content-Type': 'application/json', ...options.headers },
+            signal: controller.signal,
             ...options,
         });
+        clearTimeout(timeoutId);
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({ error: resp.statusText }));
             throw new Error(err.error || `HTTP ${resp.status}`);
@@ -22,6 +26,11 @@ async function api(path, options = {}) {
         }
         return data;
     } catch (err) {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {
+            console.error(`API timeout: ${path}`);
+            throw new Error(`Request timed out: ${path}`);
+        }
         console.error(`API error: ${path}`, err);
         throw err;
     }

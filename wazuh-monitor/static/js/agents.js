@@ -33,6 +33,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initial load
     loadAgents();
+
+    // Auto-refresh every 30 seconds
+    if (typeof startAutoRefresh === 'function') {
+        startAutoRefresh(30, () => {
+            loadAgents();
+        });
+    }
 });
 
 async function loadAgents() {
@@ -139,5 +146,9 @@ function resetFilters() {
     document.getElementById('statusFilter').value = '';
     document.getElementById('searchInput').value = '';
     currentPage = 1;
+    loadAgents();
+}
+
+function refreshPage() {
     loadAgents();
 }
