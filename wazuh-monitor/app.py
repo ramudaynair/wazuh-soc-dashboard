@@ -106,6 +106,13 @@ def page_applications():
                            page_size=config.PAGE_SIZE)
 
 
+@app.route("/live_activity")
+def page_live_activity():
+    return render_template("live_activity.html",
+                           page="live_activity",
+                           refresh_interval=config.REFRESH_INTERVAL)
+
+
 # ── API: Connection ─────────────────────────────────────────────
 
 @app.route("/api/status")
@@ -492,6 +499,63 @@ VERIFY_SSL={str(verify).lower()}
     wazuh_service.login()
 
     return jsonify({"success": True})
+
+
+# ── API: Sysmon & Agent Explorer Telemetry ──────────────────────
+
+@app.route("/api/sysmon/telemetry")
+def api_sysmon_telemetry():
+    if not wazuh_service.is_connected:
+        return jsonify({"error": "Not connected"}), 401
+    try:
+        event_id = request.args.get("event_id", None)
+        agent = request.args.get("agent", None)
+        search = request.args.get("search", None)
+        limit = request.args.get("limit", 50, type=int)
+        offset = request.args.get("offset", 0, type=int)
+        
+        # For sysmon queries always scan the full cache (show_infra=True)
+        # since sysmon events may be tagged as infrastructure
+        result = wazuh_service.get_alerts(
+            offset=offset,
+            limit=limit,
+            search=search,
+            agent=agent,
+            sysmon_event_id=event_id,
+            show_infra=True
+        )
+        
+        # Check if ANY sysmon events exist in the cache at all (no filter)
+        if result["total"] == 0 and event_id:
+            any_sysmon = wazuh_service.get_alerts(limit=1, show_infra=True, sysmon_event_id=None)
+            all_sysmon = [x for x in any_sysmon.get("items", []) if x.get("sysmon")]
+            result["sysmon_ready"] = len(all_sysmon) > 0
+            result["message"] = (
+                "No Sysmon events found for this filter." if result["sysmon_ready"]
+                else "No Sysmon telemetry detected. Ensure Sysmon is installed and the Wazuh agent is forwarding Windows Event Logs."
+            )
+        else:
+            result["sysmon_ready"] = result["total"] > 0
+        
+        return jsonify(result)
+    except Exception as exc:
+        log.exception("Sysmon telemetry error")
+        return jsonify({"error": str(exc)}), 500
+
+
+
+@app.route("/api/agents/<agent_id>/explorer/<resource>")
+def api_agent_explorer(agent_id, resource):
+    if not wazuh_service.is_connected:
+        return jsonify({"error": "Not connected"}), 401
+    try:
+        limit = request.args.get("limit", 100, type=int)
+        offset = request.args.get("offset", 0, type=int)
+        result = wazuh_service.get_syscollector(agent_id, resource=resource, offset=offset, limit=limit)
+        return jsonify(result)
+    except Exception as exc:
+        log.exception("Agent explorer error")
+        return jsonify({"error": str(exc)}), 500
 
 
 # ── API: Cache ──────────────────────────────────────────────────

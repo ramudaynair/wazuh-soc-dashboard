@@ -278,9 +278,12 @@ class WazuhService:
     def get_syscollector(self, agent_id, resource="packages", offset=0, limit=50):
         """GET /syscollector/{agent_id}/{resource}"""
         try:
+            params = {}
+            if resource not in ("hardware", "os"):
+                params = {"limit": limit, "offset": offset}
             res = self._get(
                 f"/syscollector/{agent_id}/{resource}",
-                params={"limit": limit, "offset": offset},
+                params=params,
                 cache_key=f"syscol_{agent_id}_{resource}_{offset}_{limit}",
                 cache_ttl=60
             )
@@ -400,7 +403,7 @@ class WazuhService:
 
     # ── Local archives.json SIEM Event Parsing ──────────────────────
 
-    def get_alerts(self, offset=0, limit=20, search=None, level=None, agent=None, category=None, show_infra=False):
+    def get_alerts(self, offset=0, limit=20, search=None, level=None, agent=None, category=None, show_infra=False, sysmon_event_id=None):
         """
         Reads SIEM alerts from cached archives.json.
         """
@@ -414,6 +417,10 @@ class WazuhService:
                 decoder = item.get("decoder", {}).get("name", "").lower()
                 infra_keywords = ["syscollector", "rootcheck", "indexer-connector", "wazuh-modulesd", "inventory synchronization", "evaluation started", "evaluation finished"]
                 if any(k in desc or k in groups or k in decoder for k in infra_keywords):
+                    continue
+
+            if sysmon_event_id:
+                if not item.get("sysmon") or item.get("sysmon", {}).get("event_id") != str(sysmon_event_id):
                     continue
 
             if agent:
@@ -657,12 +664,12 @@ def _read_last_rule_lines(filepath, num_lines=15000):
                 parts = buffer.split(b"\n")
                 buffer = parts[0]
                 for line in reversed(parts[1:]):
-                    if b'"rule":' in line:
+                    if b'"rule":' in line or b'"win":' in line:
                         lines.append(line.decode("utf-8", errors="ignore").strip())
                         if len(lines) >= num_lines:
                             break
             
-            if len(lines) < num_lines and b'"rule":' in buffer:
+            if len(lines) < num_lines and (b'"rule":' in buffer or b'"win":' in buffer):
                 lines.append(buffer.decode("utf-8", errors="ignore").strip())
                 
         lines.reverse()
@@ -671,9 +678,26 @@ def _read_last_rule_lines(filepath, num_lines=15000):
         return []
 
 def _normalize_security_event(raw):
+    win_data = raw.get("data", {})
+    if isinstance(win_data, dict):
+        win_data = win_data.get("win", {})
+    else:
+        win_data = {}
+
+    is_windows = isinstance(win_data, dict) and win_data
+
     rule = raw.get("rule")
     if not rule or not isinstance(rule, dict) or not rule.get("id"):
-        return None
+        if not is_windows:
+            return None
+        system = win_data.get("system", {}) if isinstance(win_data, dict) else {}
+        event_id_str = str(system.get("eventID", "")) if isinstance(system, dict) else ""
+        rule = {
+            "id": f"win_{event_id_str}" if event_id_str else "win_unknown",
+            "level": 3,
+            "description": f"Windows Event Channel Log (ID {event_id_str})" if event_id_str else "Windows Event Channel Log",
+            "groups": ["windows", "windows_eventchannel"]
+        }
 
     desc = rule.get("description", "")
     desc_lower = desc.lower()
@@ -699,13 +723,9 @@ def _normalize_security_event(raw):
     is_sysmon = False
     sysmon_id = None
     event_id = None
-    win_data = raw.get("data", {})
-    if isinstance(win_data, dict):
-        win_data = win_data.get("win", {})
-    else:
-        win_data = {}
+    sysmon_details = None
 
-    if isinstance(win_data, dict) and win_data:
+    if is_windows:
         system = win_data.get("system", {})
         if isinstance(system, dict):
             event_id = str(system.get("eventID", ""))
@@ -732,7 +752,124 @@ def _normalize_security_event(raw):
         or event_id in ["4625"]
     )
 
-    if auth_success or auth_failed or event_id in ["4624", "4625", "4672", "4740"] or any(k in desc_lower for k in ["logon", "login", "authentication", "auth", "lockout", "password"]):
+    if is_sysmon:
+        category = "system"
+        eventdata = win_data.get("eventdata", {})
+        if not isinstance(eventdata, dict):
+            eventdata = {}
+        
+        sysmon_details = {
+            "event_id": sysmon_id,
+            "image": eventdata.get("image", eventdata.get("sourceImage", "")),
+            "parent_image": eventdata.get("parentImage", ""),
+            "command_line": eventdata.get("commandLine", ""),
+            "parent_command_line": eventdata.get("parentCommandLine", ""),
+            "user": eventdata.get("user", eventdata.get("subjectUserName", "")),
+            "process_guid": eventdata.get("processGuid", ""),
+            "parent_process_guid": eventdata.get("parentProcessGuid", ""),
+            "process_id": eventdata.get("processId", ""),
+            "parent_process_id": eventdata.get("parentProcessId", ""),
+            "target_filename": eventdata.get("targetFilename", ""),
+            "target_object": eventdata.get("targetObject", ""),
+            "details": eventdata.get("details", ""),
+            "dest_ip": eventdata.get("destinationIp", ""),
+            "dest_port": eventdata.get("destinationPort", ""),
+            "src_ip": eventdata.get("sourceIp", ""),
+            "src_port": eventdata.get("sourcePort", ""),
+            "protocol": eventdata.get("protocol", ""),
+            "query_name": eventdata.get("queryName", ""),
+            "query_status": eventdata.get("queryStatus", ""),
+            "call_trace": eventdata.get("callTrace", ""),
+            "target_image": eventdata.get("targetImage", ""),
+            "source_image": eventdata.get("sourceImage", ""),
+            "mitre_technique": "",
+            "mitre_tactic": "",
+            "mitre_name": ""
+        }
+
+        if sysmon_id == "1":
+            category = "security"
+            image_name = sysmon_details["image"] or "unknown"
+            desc = f"Process Created: {image_name}"
+            cmd = sysmon_details["command_line"].lower()
+            img = image_name.lower()
+            if "powershell" in img or "powershell" in cmd:
+                sysmon_details["mitre_technique"] = "T1059.001"
+                sysmon_details["mitre_tactic"] = "Execution"
+                sysmon_details["mitre_name"] = "PowerShell"
+            elif "certutil" in img or "certutil" in cmd:
+                sysmon_details["mitre_technique"] = "T1105"
+                sysmon_details["mitre_tactic"] = "Command and Control"
+                sysmon_details["mitre_name"] = "Ingress Tool Transfer"
+            elif "cmd.exe" in img or "cmd.exe" in cmd:
+                sysmon_details["mitre_technique"] = "T1059.003"
+                sysmon_details["mitre_tactic"] = "Execution"
+                sysmon_details["mitre_name"] = "Windows Command Shell"
+            else:
+                sysmon_details["mitre_technique"] = "T1204.002"
+                sysmon_details["mitre_tactic"] = "Execution"
+                sysmon_details["mitre_name"] = "Malicious File Execution"
+
+        elif sysmon_id == "3":
+            category = "security"
+            dest_ip = sysmon_details["dest_ip"] or "unknown"
+            dest_port = sysmon_details["dest_port"] or ""
+            desc = f"Network Connection: {dest_ip}:{dest_port}"
+            sysmon_details["mitre_technique"] = "T1071"
+            sysmon_details["mitre_tactic"] = "Command and Control"
+            sysmon_details["mitre_name"] = "Application Layer Protocol"
+
+        elif sysmon_id == "10":
+            category = "security"
+            src = sysmon_details["source_image"] or "unknown"
+            tgt = sysmon_details["target_image"] or "unknown"
+            desc = f"Process Access: {src} accessed {tgt}"
+            if "lsass" in tgt.lower() or "lsass" in src.lower():
+                sysmon_details["mitre_technique"] = "T1003.001"
+                sysmon_details["mitre_tactic"] = "Credential Access"
+                sysmon_details["mitre_name"] = "LSASS Memory"
+            else:
+                sysmon_details["mitre_technique"] = "T1055"
+                sysmon_details["mitre_tactic"] = "Defense Evasion"
+                sysmon_details["mitre_name"] = "Process Injection"
+
+        elif sysmon_id == "11":
+            category = "security"
+            filename = sysmon_details["target_filename"] or "unknown"
+            desc = f"File Created: {filename}"
+            sysmon_details["mitre_technique"] = "T1106"
+            sysmon_details["mitre_tactic"] = "Execution"
+            sysmon_details["mitre_name"] = "Native API"
+
+        elif sysmon_id in ["12", "13", "14"]:
+            category = "security"
+            target_obj = sysmon_details["target_object"] or "unknown"
+            desc = f"Registry Change: {target_obj}"
+            if "run" in target_obj.lower() or "runonce" in target_obj.lower():
+                sysmon_details["mitre_technique"] = "T1547.001"
+                sysmon_details["mitre_tactic"] = "Persistence"
+                sysmon_details["mitre_name"] = "Registry Run Keys"
+            else:
+                sysmon_details["mitre_technique"] = "T1112"
+                sysmon_details["mitre_tactic"] = "Defense Evasion"
+                sysmon_details["mitre_name"] = "Modify Registry"
+
+        elif sysmon_id == "22":
+            category = "security"
+            query = sysmon_details["query_name"] or "unknown"
+            desc = f"DNS Query: {query}"
+            sysmon_details["mitre_technique"] = "T1071.004"
+            sysmon_details["mitre_tactic"] = "Command and Control"
+            sysmon_details["mitre_name"] = "DNS"
+        else:
+            desc = f"Sysmon Event ID {sysmon_id}"
+
+        if sysmon_details.get("user"):
+            username = sysmon_details["user"]
+        if sysmon_details.get("src_ip"):
+            src_ip = sysmon_details["src_ip"]
+
+    elif auth_success or auth_failed or event_id in ["4624", "4625", "4672", "4740"] or any(k in desc_lower for k in ["logon", "login", "authentication", "auth", "lockout", "password"]):
         category = "authentication"
         if event_id:
             if event_id in ["4624", "4672"]:
@@ -813,23 +950,6 @@ def _normalize_security_event(raw):
     elif any(k in desc_lower or k in groups for k in ["virus", "malware", "trojan", "clamav", "defender", "antivirus"]):
         category = "malware"
 
-    elif is_sysmon:
-        category = "system"
-        if sysmon_id == "1":
-            category = "security"
-            eventdata = win_data.get("eventdata", {})
-            image_name = eventdata.get("image", "unknown") if isinstance(eventdata, dict) else "unknown"
-            desc = f"Process Created: {image_name}"
-        elif sysmon_id == "3":
-            eventdata = win_data.get("eventdata", {})
-            dest_ip = eventdata.get("destinationIp", "unknown") if isinstance(eventdata, dict) else "unknown"
-            dest_port = eventdata.get("destinationPort", "") if isinstance(eventdata, dict) else ""
-            desc = f"Network Connection: {dest_ip}:{dest_port}"
-        elif sysmon_id in ["12", "13", "14"]:
-            eventdata = win_data.get("eventdata", {})
-            target_obj = eventdata.get("targetObject", "unknown") if isinstance(eventdata, dict) else "unknown"
-            desc = f"Registry Change: {target_obj}"
-
     elif "service_installation" in groups or "service_creation" in groups or any(k in desc_lower for k in ["service startup", "service created", "service installed"]) or event_id == "7045":
         category = "system"
 
@@ -888,6 +1008,7 @@ def _normalize_security_event(raw):
         "username": username,
         "src_ip": src_ip,
         "auth_status": auth_status,
+        "sysmon": sysmon_details,
         "raw": raw,
     }
 
