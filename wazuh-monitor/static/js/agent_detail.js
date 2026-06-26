@@ -32,6 +32,8 @@ document.addEventListener('DOMContentLoaded', () => {
             // Load specific tab data on click
             if (tab.dataset.tab === 'apps') {
                 loadAgentApps();
+            } else if (tab.dataset.tab === 'explorer') {
+                loadEndpointExplorer();
             }
         });
     });
@@ -49,6 +51,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Initial load
     loadAgent();
+
+    // Auto-refresh every 30 seconds
+    if (typeof startAutoRefresh === 'function') {
+        startAutoRefresh(30, () => {
+            refreshPage();
+        });
+    }
 });
 
 function refreshPage() {
@@ -275,3 +284,257 @@ async function loadAgentApps() {
     }
 }
 
+// ── Endpoint Explorer Engine ────────────────────────────────────
+
+let activeSubtab = "processes";
+
+async function loadEndpointExplorer() {
+    setupSubtabs();
+    loadExplorerHardware();
+    loadActiveSubtabData();
+}
+
+function setupSubtabs() {
+    const subtabs = document.querySelectorAll('.explorer-subtab-btn');
+    subtabs.forEach(btn => {
+        // Prevent duplicate listener additions
+        if (!btn.dataset.listenerBound) {
+            btn.dataset.listenerBound = "true";
+            btn.addEventListener('click', () => {
+                subtabs.forEach(t => t.classList.remove('active'));
+                btn.classList.add('active');
+                
+                activeSubtab = btn.dataset.subtab;
+                
+                document.querySelectorAll('.explorer-subview').forEach(view => {
+                    view.style.display = "none";
+                });
+                
+                const targetView = document.getElementById(`subview_${activeSubtab}`);
+                if (targetView) targetView.style.display = "block";
+                
+                loadActiveSubtabData();
+            });
+        }
+    });
+}
+
+function loadActiveSubtabData() {
+    if (activeSubtab === "processes") loadExplorerProcesses();
+    else if (activeSubtab === "ports") loadExplorerPorts();
+    else if (activeSubtab === "netaddr") loadExplorerNet();
+    else if (activeSubtab === "users") loadExplorerUsers();
+}
+
+// Load CPU and RAM hardware info
+async function loadExplorerHardware() {
+    const cpuEl = document.getElementById('cpuModelName');
+    const cpuCoresEl = document.getElementById('cpuCoresValue');
+    const cpuMhzEl = document.getElementById('cpuMhzValue');
+    
+    const ramUsagePercent = document.getElementById('ramUsagePercent');
+    const ramUsageBar = document.getElementById('ramUsageBar');
+    const ramTotalValue = document.getElementById('ramTotalValue');
+    const ramFreeValue = document.getElementById('ramFreeValue');
+    
+    try {
+        const data = await api(`/api/agents/${agentId}/explorer/hardware`);
+        const item = data.items && data.items[0] ? data.items[0] : null;
+        
+        if (item) {
+            cpuEl.textContent = item.cpu ? item.cpu.name : "Unknown CPU";
+            cpuCoresEl.textContent = item.cpu ? `${item.cpu.cores} Cores` : "— Cores";
+            cpuMhzEl.textContent = item.cpu ? `${Math.round(item.cpu.mhz || 0)} MHz` : "— MHz";
+            
+            const ramTotalGb = ((item.ram ? item.ram.total : 0) / 1024 / 1024).toFixed(2);
+            const ramFreeGb = ((item.ram ? item.ram.free : 0) / 1024 / 1024).toFixed(2);
+            const usedPercent = item.ram ? Math.round(item.ram.usage || 0) : 0;
+            
+            ramUsagePercent.textContent = `${usedPercent}%`;
+            ramUsageBar.style.width = `${usedPercent}%`;
+            ramTotalValue.textContent = `${ramTotalGb} GB`;
+            ramFreeValue.textContent = `${ramFreeGb} GB`;
+            
+            // Adjust bar color based on usage
+            if (usedPercent > 85) {
+                ramUsageBar.style.background = "var(--red)";
+                ramUsagePercent.style.color = "var(--red)";
+            } else if (usedPercent > 65) {
+                ramUsageBar.style.background = "var(--yellow)";
+                ramUsagePercent.style.color = "var(--yellow)";
+            } else {
+                ramUsageBar.style.background = "var(--green)";
+                ramUsagePercent.style.color = "var(--green)";
+            }
+        }
+    } catch (err) {
+        console.error("Failed to load hardware", err);
+        cpuEl.textContent = "Failed to load hardware telemetry";
+    }
+}
+
+// 1. Running Processes
+async function loadExplorerProcesses() {
+    const tbody = document.getElementById('explorerProcessesTbody');
+    const badge = document.getElementById('explorerProcessCount');
+    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-text">Loading processes...</div></div></td></tr>`;
+    
+    try {
+        const data = await api(`/api/agents/${agentId}/explorer/processes`);
+        const items = data.items || [];
+        badge.textContent = `${items.length} processes`;
+        
+        if (!items.length) {
+            tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-text">No processes found</div></div></td></tr>`;
+            return;
+        }
+        
+        // Sort processes by PID numerically
+        items.sort((a, b) => (parseInt(a.pid) || 0) - (parseInt(b.pid) || 0));
+        
+        tbody.innerHTML = items.map(p => {
+            const rawState = p.state || 'active';
+            const stateLabel = rawState.charAt(0).toUpperCase() + rawState.slice(1);
+            let stateBg = 'var(--border)';
+            let stateColor = 'var(--text-muted)';
+            const stateLower = rawState.toLowerCase();
+            if (stateLower === 'running' || stateLower === 'active') {
+                stateBg = 'rgba(63,185,80,0.15)';
+                stateColor = 'var(--green)';
+            } else if (stateLower === 'sleeping') {
+                stateBg = 'rgba(88,166,255,0.15)';
+                stateColor = 'var(--blue)';
+            } else if (stateLower === 'zombie' || stateLower === 'stopped') {
+                stateBg = 'rgba(248,81,73,0.15)';
+                stateColor = 'var(--red)';
+            }
+
+            const nameHtml = `<strong>${escapeHtml(p.name || '—')}</strong>${p.uname ? `<br><span style="font-size:10px; color:var(--muted)">User: ${escapeHtml(p.uname)}</span>` : ''}`;
+
+            return `
+            <tr>
+                <td class="mono font-bold">${escapeHtml(String(p.pid || '—'))}</td>
+                <td>${nameHtml}</td>
+                <td class="mono" style="font-size:11px; max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(p.cmd || '')}">
+                    ${escapeHtml(p.cmd || '—')}
+                </td>
+                <td><span class="badge" style="background:${stateBg}; color:${stateColor}; border:1px solid ${stateColor}22;">${escapeHtml(stateLabel)}</span></td>
+            </tr>`;
+        }).join('');
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state" style="color:var(--red)"><div class="empty-text">Error loading processes: ${escapeHtml(err.message)}</div></div></td></tr>`;
+    }
+}
+
+// 2. Open Ports
+async function loadExplorerPorts() {
+    const tbody = document.getElementById('explorerPortsTbody');
+    const badge = document.getElementById('explorerPortsCount');
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-text">Loading ports...</div></div></td></tr>`;
+    
+    try {
+        const data = await api(`/api/agents/${agentId}/explorer/ports`);
+        const items = data.items || [];
+        badge.textContent = `${items.length} ports`;
+        
+        if (!items.length) {
+            tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-text">No open ports found</div></div></td></tr>`;
+            return;
+        }
+        
+        tbody.innerHTML = items.map(p => {
+            // Wazuh returns { local: { ip, port }, remote: { ip, port }, process, state, protocol, pid }
+            const localIp  = (p.local  && p.local.ip)   || '0.0.0.0';
+            const localPort = (p.local  && p.local.port) || '—';
+            const proto    = (p.protocol || 'TCP').toUpperCase();
+            const state    = p.state || 'UNKNOWN';
+            const pid      = p.pid || '—';
+            const process  = p.process || '—';
+            const isListen = state.toLowerCase() === 'listening' || state.toLowerCase() === 'listen';
+            return `
+            <tr>
+                <td class="mono">${escapeHtml(String(localIp))}</td>
+                <td class="mono font-bold">${escapeHtml(String(localPort))}</td>
+                <td><span class="badge" style="background:var(--panel);">${escapeHtml(proto)}</span></td>
+                <td><span class="badge" style="background:${isListen ? 'rgba(63,185,80,0.15); color:var(--green);' : 'var(--border);'}">${escapeHtml(state)}</span></td>
+                <td class="mono">${escapeHtml(String(pid))} <span style="color:var(--muted); font-size:11px;">${escapeHtml(process)}</span></td>
+            </tr>`;
+        }).join('');
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state" style="color:var(--red)"><div class="empty-text">Error loading ports: ${escapeHtml(err.message)}</div></div></td></tr>`;
+    }
+}
+
+// 3. Network Interfaces
+async function loadExplorerNet() {
+    const tbody = document.getElementById('explorerNetTbody');
+    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-text">Loading network interfaces...</div></div></td></tr>`;
+    
+    try {
+        const data = await api(`/api/agents/${agentId}/explorer/netaddr`);
+        const items = data.items || [];
+        
+        if (!items.length) {
+            tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-text">No interfaces found</div></div></td></tr>`;
+            return;
+        }
+        
+        tbody.innerHTML = items.map(n => {
+            // Wazuh netaddr: { iface, address, proto, netmask, broadcast }
+            const ip      = n.address || n.ip || '—';
+            const iface   = n.iface   || '—';
+            const proto   = (n.proto  || 'ipv4').toUpperCase();
+            const netmask = n.netmask || '—';
+            return `
+            <tr>
+                <td><strong>${escapeHtml(iface)}</strong></td>
+                <td class="mono font-bold">${escapeHtml(ip)}</td>
+                <td class="mono" style="color:var(--muted);">${escapeHtml(netmask)}</td>
+                <td><span class="badge" style="background:var(--panel);">${escapeHtml(proto)}</span></td>
+            </tr>`;
+        }).join('');
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state" style="color:var(--red)"><div class="empty-text">Error loading interfaces: ${escapeHtml(err.message)}</div></div></td></tr>`;
+    }
+}
+
+// 4. Users (Windows syscollector returns nested user object)
+async function loadExplorerUsers() {
+    const tbody = document.getElementById('explorerUsersTbody');
+    const badge = document.getElementById('explorerUsersCount');
+    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-text">Loading users...</div></div></td></tr>`;
+    
+    try {
+        const data = await api(`/api/agents/${agentId}/explorer/users`);
+        const items = data.items || [];
+        badge.textContent = `${items.length} users`;
+        
+        if (!items.length) {
+            tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-text">No users found</div></div></td></tr>`;
+            return;
+        }
+        
+        tbody.innerHTML = items.map(u => {
+            // Windows Wazuh returns { user: { name, id, groups, type, full_name, ... }, login: {...} }
+            const userObj  = u.user  || u; // fallback to flat for Linux agents
+            const loginObj = u.login || {};
+            const name     = userObj.name     || u.username || '—';
+            const uid      = userObj.id       || u.uid      || '—';
+            const groups   = userObj.groups   || u.gid      || '—';
+            const userType = userObj.type     || 'local';
+            const fullName = userObj.full_name || '';
+            const lastLogin = loginObj.status !== undefined
+                ? (loginObj.status === 0 ? 'Not logged in' : 'Active')
+                : '—';
+            return `
+            <tr>
+                <td class="font-bold">${escapeHtml(name)}<br><span style="font-size:11px;color:var(--muted)">${escapeHtml(fullName)}</span></td>
+                <td class="mono">${escapeHtml(String(uid))}</td>
+                <td><span class="badge" style="background:var(--panel);">${escapeHtml(groups)}</span></td>
+                <td><span class="badge" style="background:${userType === 'local' ? 'var(--border)' : 'rgba(88,166,255,0.15); color:var(--blue);'}">${escapeHtml(userType)}</span></td>
+            </tr>`;
+        }).join('');
+    } catch (err) {
+        tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state" style="color:var(--red)"><div class="empty-text">Error loading users: ${escapeHtml(err.message)}</div></div></td></tr>`;
+    }
+}
