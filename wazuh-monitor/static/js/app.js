@@ -415,16 +415,26 @@ window.toggleRawEvent = function(idx) {
 function formatTime(ts) {
     if (!ts) return '—';
     try {
-        // Wazuh /manager/logs returns timestamps in server local time
-        // but appends "Z" suffix — strip it to avoid incorrect UTC conversion
         let normalised = ts.replace(/\//g, '-');
-        // Remove trailing Z so JS treats it as local time, not UTC
-        normalised = normalised.replace(/Z$/i, '');
+        // If it does not contain a timezone offset indicator (+/-) and ends with Z,
+        // it might be Wazuh server local time with Z appended.
+        // Let's strip Z only if it doesn't contain a timezone offset.
+        if (!normalised.includes('+') && !normalised.includes('-')) {
+            normalised = normalised.replace(/Z$/i, '');
+        }
         const d = new Date(normalised);
         if (isNaN(d.getTime())) return ts;  // Fallback: show raw string
-        return d.toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' }) +
-            ' ' + d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }) +
-            ' IST';
+        
+        const dateStr = d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' });
+        const timeStr = d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false });
+        
+        // Retrieve local timezone abbreviation dynamically
+        const tzName = new Intl.DateTimeFormat('en-US', { timeZoneName: 'short' })
+            .formatToParts(d)
+            .find(part => part.type === 'timeZoneName')?.value || 'UTC';
+
+        const relativeStr = formatRelative(d.toISOString());
+        return `${dateStr} ${timeStr} ${tzName} (${relativeStr})`;
     } catch { return ts; }
 }
 
