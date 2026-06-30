@@ -28,6 +28,11 @@ class WazuhService:
         self.password = config.PASSWORD
         self.verify_ssl = config.VERIFY_SSL
         
+        # Wazuh Indexer (OpenSearch) connection for vulnerability queries
+        self.indexer_host = config.INDEXER_HOST.rstrip("/")
+        self.indexer_username = config.INDEXER_USERNAME
+        self.indexer_password = config.INDEXER_PASSWORD
+        
         self._token = None
         self._token_expires = 0
         self.is_connected = False
@@ -112,7 +117,7 @@ class WazuhService:
             "last_error": self.last_error,
         }
 
-    def _get(self, path, params=None, cache_key=None, cache_ttl=30):
+    def _get(self, path, params=None, cache_key=None, cache_ttl=30, ignore_404=False):
         """
         Authenticated GET request helper with caching and auto-retry on 401.
         """
@@ -156,7 +161,53 @@ class WazuhService:
                 raise ConnectionError(f"Wazuh API retry failed: {exc}") from exc
 
         if resp.status_code != 200:
+            if resp.status_code == 404 and ignore_404:
+                return {}
             raise RuntimeError(f"Wazuh API returned HTTP {resp.status_code} on {path}: {resp.text[:200]}")
+
+        data = resp.json()
+        if cache_key:
+            cache.set(cache_key, data, cache_ttl)
+        return data
+
+    # ── Wazuh Indexer (OpenSearch) Query Helper ─────────────────────
+
+    def _indexer_query(self, index, query_body, cache_key=None, cache_ttl=60):
+        """
+        Query the Wazuh Indexer (OpenSearch) using HTTP Basic Auth.
+        Used for vulnerability state data which is no longer served by
+        the Manager API in Wazuh 4.x.
+        """
+        if cache_key:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        if not self.indexer_password:
+            log.warning("Wazuh Indexer password not configured — set WAZUH_INDEXER_PASSWORD in .env")
+            return {"hits": {"total": {"value": 0}, "hits": []}}
+
+        url = f"{self.indexer_host}/{index}/_search"
+        try:
+            resp = requests.post(
+                url,
+                json=query_body,
+                auth=(self.indexer_username, self.indexer_password),
+                verify=self.verify_ssl,
+                timeout=self.REQUEST_TIMEOUT,
+                headers={"Content-Type": "application/json"}
+            )
+        except Exception as exc:
+            log.error("Wazuh Indexer request failed: %s", exc)
+            return {"hits": {"total": {"value": 0}, "hits": []}}
+
+        if resp.status_code == 401:
+            log.error("Wazuh Indexer auth failed (HTTP 401) — check WAZUH_INDEXER_USERNAME/PASSWORD in .env")
+            return {"hits": {"total": {"value": 0}, "hits": []}}
+
+        if resp.status_code != 200:
+            log.error("Wazuh Indexer returned HTTP %s: %s", resp.status_code, resp.text[:300])
+            return {"hits": {"total": {"value": 0}, "hits": []}}
 
         data = resp.json()
         if cache_key:
@@ -224,22 +275,102 @@ class WazuhService:
         except Exception:
             return {}
 
-    def get_vulnerabilities(self, agent_id, offset=0, limit=50):
-        """GET /vulnerability/{agent_id}"""
+    def get_vulnerabilities(self, agent_id=None, offset=0, limit=50, severity=None):
+        """
+        Query vulnerability state from the Wazuh Indexer (OpenSearch).
+        In Wazuh 4.x, vulnerability data is stored in the Indexer under
+        the 'wazuh-states-vulnerabilities-*' index, NOT the Manager API.
+        """
         try:
-            res = self._get(
-                f"/vulnerability/{agent_id}",
-                params={"limit": limit, "offset": offset},
-                cache_key=f"vulns_{agent_id}_{offset}_{limit}",
+            # Build OpenSearch query
+            must_clauses = []
+            if agent_id:
+                must_clauses.append({"match": {"agent.id": str(agent_id)}})
+            
+            if severity:
+                if isinstance(severity, list):
+                    must_clauses.append({"terms": {"vulnerability.severity": severity}})
+                else:
+                    must_clauses.append({"match": {"vulnerability.severity": severity}})
+            
+            query = {"bool": {"must": must_clauses}} if must_clauses else {"match_all": {}}
+
+            body = {
+                "query": query,
+                "from": offset,
+                "size": limit,
+                "sort": [{"vulnerability.detected_at": {"order": "desc", "unmapped_type": "date"}}]
+            }
+
+            res = self._indexer_query(
+                "wazuh-states-vulnerabilities-*",
+                body,
+                cache_key=f"vulns_{agent_id}_{offset}_{limit}_{severity}",
                 cache_ttl=60
             )
-            return {
-                "items": res.get("data", {}).get("affected_items", []),
-                "total": res.get("data", {}).get("total_affected_items", 0)
-            }
+
+            hits = res.get("hits", {})
+            total_obj = hits.get("total", {})
+            total = total_obj.get("value", 0) if isinstance(total_obj, dict) else int(total_obj)
+
+            items = []
+            for hit in hits.get("hits", []):
+                src = hit.get("_source", {})
+                vuln = src.get("vulnerability", {})
+                agent = src.get("agent", {})
+                pkg = src.get("package", {})
+                items.append({
+                    "cve": vuln.get("id", ""),
+                    "title": vuln.get("title", "") or vuln.get("description", ""),
+                    "severity": vuln.get("severity", "Unknown"),
+                    "name": pkg.get("name", ""),
+                    "version": pkg.get("version", ""),
+                    "architecture": pkg.get("architecture", ""),
+                    "status": vuln.get("status", ""),
+                    "detected_at": vuln.get("detected_at", ""),
+                    "published_at": vuln.get("published_at", ""),
+                    "reference": vuln.get("reference", ""),
+                    "agent_id": agent.get("id", ""),
+                    "agent_name": agent.get("name", ""),
+                })
+
+            return {"items": items, "total": total}
         except Exception as exc:
             log.warning("Failed to fetch vulnerabilities for agent %s: %s", agent_id, exc)
             return {"items": [], "total": 0}
+
+    def get_vulnerabilities_summary(self):
+        """
+        Get global vulnerability summary by severity directly from indexer aggregation.
+        """
+        try:
+            body = {
+                "size": 0,
+                "aggs": {
+                    "by_severity": {
+                        "terms": {
+                            "field": "vulnerability.severity"
+                        }
+                    }
+                }
+            }
+            res = self._indexer_query(
+                "wazuh-states-vulnerabilities-*",
+                body,
+                cache_key="vulns_global_summary",
+                cache_ttl=30
+            )
+            buckets = res.get("aggregations", {}).get("by_severity", {}).get("buckets", [])
+            summary = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+            for b in buckets:
+                key = str(b.get("key", "")).lower()
+                doc_count = b.get("doc_count", 0)
+                if key in summary:
+                    summary[key] = doc_count
+            return summary
+        except Exception as exc:
+            log.warning("Failed to get vulnerabilities summary via indexer: %s", exc)
+            return {"critical": 0, "high": 0, "medium": 0, "low": 0}
 
     def get_sca(self, agent_id, offset=0, limit=50):
         """GET /sca/{agent_id}"""
@@ -326,7 +457,7 @@ class WazuhService:
             return {"status": "Unhealthy", "version": "unknown", "name": "manager"}
 
     def get_stats(self):
-        """Build a stats payload with real severity breakdown."""
+        """Build a stats payload with real severity breakdown from security alerts."""
         try:
             summary = self.get_agent_summary()
         except Exception:
@@ -344,39 +475,33 @@ class WazuhService:
         medium_count = 0
         low_count = 0
         info_count = 0
-        top_tags = []
+        top_agents = {}
+        
         try:
-            logs = self._get("/manager/logs/summary", cache_key="log_summary", cache_ttl=30)
-            log_data = logs.get("data", {}).get("affected_items", [])
-            if isinstance(log_data, list):
-                for entry in log_data:
-                    for tag_name, counts in entry.items():
-                        if isinstance(counts, dict):
-                            tag_all = counts.get("all", 0)
-                            alert_total += tag_all
-                            critical_count += counts.get("critical", 0)
-                            high_count += counts.get("error", 0)
-                            medium_count += counts.get("warning", 0)
-                            low_count += counts.get("info", 0)
-                            info_count += counts.get("debug", 0)
-                            top_tags.append({"name": tag_name, "count": tag_all})
-                top_tags.sort(key=lambda x: x["count"], reverse=True)
-                top_tags = top_tags[:5]
-            elif isinstance(log_data, dict):
-                for tag, counts in log_data.items():
-                    if isinstance(counts, dict):
-                        tag_all = counts.get("all", 0)
-                        alert_total += tag_all
-                        critical_count += counts.get("critical", 0)
-                        high_count += counts.get("error", 0)
-                        medium_count += counts.get("warning", 0)
-                        low_count += counts.get("info", 0)
-                        info_count += counts.get("debug", 0)
-                        top_tags.append({"name": tag, "count": tag_all})
-                top_tags.sort(key=lambda x: x["count"], reverse=True)
-                top_tags = top_tags[:5]
+            alerts = self._get_cached_security_alerts()
+            alert_total = len(alerts)
+            for item in alerts:
+                lvl = item.get("rule", {}).get("level", 0)
+                if lvl >= 12:
+                    critical_count += 1
+                elif lvl >= 9:
+                    high_count += 1
+                elif lvl >= 5:
+                    medium_count += 1
+                elif lvl >= 3:
+                    low_count += 1
+                else:
+                    info_count += 1
+                
+                agent_name = item.get("agent", {}).get("name", "manager")
+                top_agents[agent_name] = top_agents.get(agent_name, 0) + 1
+            
+            top_tags = [{"name": name, "count": count} for name, count in top_agents.items()]
+            top_tags.sort(key=lambda x: x["count"], reverse=True)
+            top_tags = top_tags[:5]
         except Exception as exc:
-            log.warning("Could not fetch log summary: %s", exc)
+            log.warning("Could not calculate stats from cached alerts: %s", exc)
+            top_tags = []
 
         return {
             "agents": {
@@ -556,6 +681,11 @@ class WazuhService:
             "failed_logins": 0,
             "successful_logins": 0,
             "locked_accounts": 0,
+            "new_users": 0,
+            "privileged_logins": 0,
+            "remote_logins": 0,
+            "failures_by_user": {},
+            "failures_by_ip": {},
             "usb_events": 0,
             "software_changes": 0,
             "malware_alerts": 0,
@@ -567,10 +697,10 @@ class WazuhService:
             stats["offline_endpoints"] = summary.get("disconnected", 0)
         except Exception:
             pass
-
+ 
         today_str = datetime.now().strftime("%Y-%m-%d")
         alerts = self._get_cached_security_alerts()
-
+ 
         for parsed in alerts:
             try:
                 ts = parsed.get("timestamp", "")
@@ -582,12 +712,38 @@ class WazuhService:
                     continue
                 
                 cat = parsed.get("category")
+                rule = parsed.get("rule", {})
+                groups = rule.get("groups", [])
+                description = rule.get("description", "").lower()
+                raw_data = parsed.get("raw", {}).get("data", {})
+                win_system = raw_data.get("win", {}).get("system", {})
+                event_id = str(win_system.get("eventID", ""))
+                
+                # Check for user creation
+                if event_id == "4720" or "user_added" in groups or "group_added" in groups or "user creation" in description:
+                    stats["new_users"] += 1
+                
+                # Check for privileged login (root/admin or event 4672 assign privilege)
+                if event_id == "4672" or (cat == "authentication" and parsed.get("auth_status") == "success" and parsed.get("username", "").lower() in ["root", "admin", "administrator", "system"]):
+                    stats["privileged_logins"] += 1
+
                 if cat == "authentication":
                     status = parsed.get("auth_status")
+                    usr = parsed.get("username", "—")
+                    src = parsed.get("src_ip", "—")
+                    
                     if status == "success":
                         stats["successful_logins"] += 1
+                        # Remote logins (RDP Logon Type 10 or sshd or has source IP that is not local loopback)
+                        logon_type = str(raw_data.get("win", {}).get("eventdata", {}).get("logonType", ""))
+                        if logon_type == "10" or "sshd" in description or (src and src not in ["—", "127.0.0.1", "::1"]):
+                            stats["remote_logins"] += 1
                     elif status == "failed":
                         stats["failed_logins"] += 1
+                        if usr and usr != "—":
+                            stats["failures_by_user"][usr] = stats["failures_by_user"].get(usr, 0) + 1
+                        if src and src != "—":
+                            stats["failures_by_ip"][src] = stats["failures_by_ip"].get(src, 0) + 1
                     elif status == "lockout":
                         stats["locked_accounts"] += 1
                 elif cat == "usb":
@@ -598,7 +754,10 @@ class WazuhService:
                     stats["malware_alerts"] += 1
             except Exception:
                 continue
-
+ 
+        # Sort and limit top failures
+        stats["failures_by_user"] = dict(sorted(stats["failures_by_user"].items(), key=lambda x: x[1], reverse=True)[:5])
+        stats["failures_by_ip"] = dict(sorted(stats["failures_by_ip"].items(), key=lambda x: x[1], reverse=True)[:5])
         return stats
 
     def get_consolidated_applications(self):
@@ -676,6 +835,51 @@ def _read_last_rule_lines(filepath, num_lines=15000):
         return lines
     except Exception:
         return []
+
+def _should_suppress_sysmon(sysmon_id, sysmon_details):
+    if not sysmon_details:
+        return False
+
+    src_img = (sysmon_details.get("source_image") or sysmon_details.get("image") or "").lower()
+    tgt_img = (sysmon_details.get("target_image") or "").lower()
+    tgt_obj = (sysmon_details.get("target_object") or "").lower()
+    query_name = (sysmon_details.get("query_name") or "").lower()
+
+    # Event ID 10: Process Access
+    if sysmon_id == "10":
+        suppressed_sources = [
+            "kaspersky", "avp.exe", "nview", "wondershare", 
+            "msedgewebview2.exe", "svchost.exe", "chrome.exe", 
+            "msedge.exe", "teams.exe", "explorer.exe", "searchindexer.exe",
+            "onedrive.exe"
+        ]
+        if any(s in src_img for s in suppressed_sources):
+            return True
+        if any(s in tgt_img for s in ["conhost.exe", "explorer.exe"]):
+            if any(s in src_img for s in ["grammarly", "whatsapp", "onedrive"]):
+                return True
+
+    # Event ID 12/13/14: Registry modification noise
+    elif sysmon_id in ["12", "13", "14"]:
+        if "capabilityaccessmanager" in tgt_obj or "services\\bam" in tgt_obj:
+            return True
+        if "svchost.exe" in src_img:
+            return True
+
+    # Event ID 22: DNS query noise
+    elif sysmon_id == "22":
+        if "svchost.exe" in src_img:
+            return True
+        benign_domains = [
+            "autodesk.com", "grammarly.io", "grammarly.com", 
+            "epicgames.com", "kaspersky.com", "vivoglobal.com", 
+            "google.com", "googleapis.com", "whatsapp.net", 
+            "facebook.com", "msftconnecttest.com", "wpad"
+        ]
+        if any(d in query_name for d in benign_domains):
+            return True
+
+    return False
 
 def _normalize_security_event(raw):
     win_data = raw.get("data", {})
@@ -786,6 +990,9 @@ def _normalize_security_event(raw):
             "mitre_tactic": "",
             "mitre_name": ""
         }
+
+        if _should_suppress_sysmon(sysmon_id, sysmon_details):
+            return None
 
         if sysmon_id == "1":
             category = "security"
@@ -1014,35 +1221,49 @@ def _normalize_security_event(raw):
 
 def _deduplicate_low_severity(alerts):
     BURST_WINDOW_SECONDS = 60
-    seen = {}
+    seen_burst = {}
+    seen_exact = set()
     result = []
 
     for event in alerts:
+        agent_id = str(event.get("agent", {}).get("id", ""))
+        ts_raw = event.get("timestamp", "")[:19]
+        cat = event.get("category", "")
+        usr = event.get("username", "")
+        src = event.get("src_ip", "")
+        desc = event.get("rule", {}).get("description", "").strip().lower()
+        rule_id = str(event.get("rule", {}).get("id", ""))
         level = event.get("rule", {}).get("level", 0)
+
+        # 1. Exact Duplicate Filter (same second, agent, user, src, status/description)
+        if cat == "authentication":
+            exact_key = (agent_id, ts_raw, cat, usr, src, event.get("auth_status"))
+        else:
+            exact_key = (agent_id, ts_raw, cat, usr, src, desc)
+            
+        if exact_key in seen_exact:
+            continue
+        seen_exact.add(exact_key)
+
+        # 2. Burst window suppression for low severity (< 7)
         if level >= 7:
             result.append(event)
             continue
 
-        rule_id  = str(event.get("rule", {}).get("id", ""))
-        agent_id = str(event.get("agent", {}).get("id", ""))
-        desc     = event.get("rule", {}).get("description", "").strip().lower()
-        ts_raw   = event.get("timestamp", "")[:19]
-
-        key = (rule_id, agent_id, desc)
-
+        burst_key = (rule_id, agent_id, desc)
         try:
             event_dt = datetime.strptime(ts_raw, "%Y-%m-%dT%H:%M:%S")
         except (ValueError, TypeError):
             result.append(event)
             continue
 
-        if key not in seen:
-            seen[key] = event_dt
+        if burst_key not in seen_burst:
+            seen_burst[burst_key] = event_dt
             result.append(event)
         else:
-            diff = abs((seen[key] - event_dt).total_seconds())
+            diff = abs((seen_burst[burst_key] - event_dt).total_seconds())
             if diff > BURST_WINDOW_SECONDS:
-                seen[key] = event_dt
+                seen_burst[burst_key] = event_dt
                 result.append(event)
 
     return result
