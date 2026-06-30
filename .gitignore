@@ -3,6 +3,16 @@
 .env.*
 !.env.example
 
+# Scratch files
+scratch/
+scratch*.py
+scratch_*.py
+
+# Local state data
+wazuh-monitor/data/
+
+
+
 # Python
 __pycache__/
 *.pyc
