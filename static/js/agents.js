@@ -31,6 +31,16 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('prevBtn').addEventListener('click', prevPage);
     document.getElementById('nextBtn').addEventListener('click', nextPage);
 
+    // Initial load check for query parameter status
+    const urlParams = new URLSearchParams(window.location.search);
+    const statusParam = urlParams.get('status');
+    if (statusParam) {
+        const filterEl = document.getElementById('statusFilter');
+        if (filterEl) {
+            filterEl.value = statusParam;
+        }
+    }
+
     // Initial load
     loadAgents();
 

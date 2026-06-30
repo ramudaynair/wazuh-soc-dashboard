@@ -146,6 +146,28 @@
         gap: 15px;
         margin-bottom: 20px;
     }
+    /* Sub tabs styling */
+    .live-sub-tab {
+        background: transparent;
+        border: 1px solid var(--border);
+        color: var(--muted);
+        padding: 5px 12px;
+        border-radius: var(--radius-sm);
+        cursor: pointer;
+        font-size: 11px;
+        font-weight: 500;
+        white-space: nowrap;
+        transition: all var(--transition);
+    }
+    .live-sub-tab:hover {
+        border-color: var(--border2);
+        color: var(--text);
+    }
+    .live-sub-tab.active {
+        background: rgba(88,166,255,0.08);
+        border-color: var(--blue);
+        color: var(--text);
+    }
 </style>
 {% endblock %}
 
@@ -184,17 +206,12 @@
 
 <!-- Tabs Navigation -->
 <div class="live-tabs-container">
-    <button class="live-tab active" data-tab="processes">🚀 Processes</button>
-    <button class="live-tab" data-tab="dns">🌐 DNS</button>
-    <button class="live-tab" data-tab="files">📁 Files</button>
-    <button class="live-tab" data-tab="registry">🧠 Registry</button>
-    <button class="live-tab" data-tab="network">🔌 Network</button>
-    <button class="live-tab" data-tab="access">🔒 Access</button>
-    <button class="live-tab" data-tab="advanced">🔍 Advanced</button>
-    <button class="live-tab" data-tab="tree">🌳 Tree</button>
-    <button class="live-tab" data-tab="dns_activity">📊 DNS Stats</button>
-    <button class="live-tab" data-tab="file_activity">📊 File Stats</button>
-    <button class="live-tab" data-tab="timeline">📈 Timeline</button>
+    <button class="live-tab active" data-tab="processes">Processes</button>
+    <button class="live-tab" data-tab="network">Network</button>
+    <button class="live-tab" data-tab="files">Files</button>
+    <button class="live-tab" data-tab="registry">Registry</button>
+    <button class="live-tab" data-tab="dns">DNS</button>
+    <button class="live-tab" data-tab="advanced">Advanced Analysis</button>
 </div>
 
 <!-- Main view card panel -->
@@ -307,107 +324,116 @@
         </div>
     </div>
 
-    <!-- Process Access Table -->
-    <div class="tab-view" id="view_access" style="display: none;">
-        <div class="tbl-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th style="width: 150px;">Time</th>
-                        <th style="width: 120px;">Agent</th>
-                        <th style="width: 220px;">Source Process (Accesser)</th>
-                        <th style="width: 220px;">Target Process (Accessed)</th>
-                        <th>MITRE Technique</th>
-                    </tr>
-                </thead>
-                <tbody id="accessTbody">
-                    <tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Loading events...</div></div></td></tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-
-    <!-- Advanced Event Viewer Table -->
+    <!-- Advanced Analysis Panel (Contains nested sub-views) -->
     <div class="tab-view" id="view_advanced" style="display: none;">
-        <div class="tbl-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th style="width: 150px;">Time</th>
-                        <th style="width: 70px;">Event ID</th>
-                        <th style="width: 120px;">Agent</th>
-                        <th style="width: 150px;">Process</th>
-                        <th>Command Line / Detail</th>
-                        <th style="width: 120px;">User</th>
-                        <th style="width: 110px;">MITRE</th>
-                        <th style="width: 80px;">Severity</th>
-                    </tr>
-                </thead>
-                <tbody id="advancedTbody">
-                    <tr><td colspan="8"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Loading events...</div></div></td></tr>
-                </tbody>
-            </table>
+        <!-- Sub-tabs Navigation -->
+        <div class="live-tabs-container" style="border-bottom: 1px solid var(--border); padding-bottom: 10px; margin-bottom: 15px; padding-left: 10px; padding-right: 10px; display: flex; gap: 8px;">
+            <button class="live-sub-tab active" data-subtab="feed">Raw Events Feed</button>
+            <button class="live-sub-tab" data-subtab="tree">Process Tree</button>
+            <button class="live-sub-tab" data-subtab="access">Process Access (LSASS)</button>
+            <button class="live-sub-tab" data-subtab="dns_activity">DNS Analytics</button>
+            <button class="live-sub-tab" data-subtab="file_activity">File Analytics</button>
+            <button class="live-sub-tab" data-subtab="timeline">Threat Timeline</button>
         </div>
-    </div>
 
-    <!-- Process Tree Diagram -->
-    <div class="tab-view" id="view_tree" style="display: none; padding: 25px; max-height: 520px; overflow: auto;">
-        <div id="treeContainer">
-            <div class="empty-state">
-                <div class="empty-icon">🌳</div>
-                <div class="empty-text">No Process Tree available. Select a specific Agent or search query to construct a spawner tree hierarchy.</div>
+        <!-- Sub-view: Raw Events Feed -->
+        <div class="sub-tab-view" id="subview_feed">
+            <div class="tbl-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 150px;">Time</th>
+                            <th style="width: 70px;">Event ID</th>
+                            <th style="width: 120px;">Agent</th>
+                            <th style="width: 150px;">Process</th>
+                            <th>Command Line / Detail</th>
+                            <th style="width: 120px;">User</th>
+                            <th style="width: 110px;">MITRE</th>
+                            <th style="width: 80px;">Severity</th>
+                        </tr>
+                    </thead>
+                    <tbody id="advancedTbody">
+                        <tr><td colspan="8"><div class="empty-state"><div class="empty-icon"><i data-lucide="search"></i></div><div class="empty-text">Loading events...</div></div></td></tr>
+                    </tbody>
+                </table>
             </div>
         </div>
-    </div>
 
-    <!-- DNS Analytics Dash -->
-    <div class="tab-view" id="view_dns_activity" style="display: none; padding: 20px;">
-        <div class="stat-grid" id="dnsStatsGrid">
-            <!-- Populated dynamically -->
+        <!-- Sub-view: Process Tree -->
+        <div class="sub-tab-view" id="subview_tree" style="display: none; padding: 25px; max-height: 500px; overflow: auto;">
+            <div id="treeContainer">
+                <div class="empty-state">
+                    <div class="empty-icon"><i data-lucide="git-branch"></i></div>
+                    <div class="empty-text">No Process Tree available. Select a specific Agent or search query to construct a spawner tree hierarchy.</div>
+                </div>
+            </div>
         </div>
-        <div class="tbl-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Domain</th>
-                        <th style="width: 150px;">Lookup Count</th>
-                        <th style="width: 200px;">Active Querying Agents</th>
-                    </tr>
-                </thead>
-                <tbody id="dnsStatsTbody">
-                    <tr><td colspan="3"><div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">No DNS activity logs found.</div></div></td></tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
 
-    <!-- File Operations Dash -->
-    <div class="tab-view" id="view_file_activity" style="display: none; padding: 20px;">
-        <div class="stat-grid" id="fileStatsGrid">
-            <!-- Populated dynamically -->
+        <!-- Sub-view: Process Access (LSASS) -->
+        <div class="sub-tab-view" id="subview_access" style="display: none;">
+            <div class="tbl-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 150px;">Time</th>
+                            <th style="width: 120px;">Agent</th>
+                            <th style="width: 220px;">Source Process (Accesser)</th>
+                            <th style="width: 220px;">Target Process (Accessed)</th>
+                            <th>MITRE Technique</th>
+                        </tr>
+                    </thead>
+                    <tbody id="accessTbody">
+                        <tr><td colspan="5"><div class="empty-state"><div class="empty-icon"><i data-lucide="search"></i></div><div class="empty-text">Loading events...</div></div></td></tr>
+                    </tbody>
+                </table>
+            </div>
         </div>
-        <div class="tbl-wrap">
-            <table>
-                <thead>
-                    <tr>
-                        <th>File Path</th>
-                        <th style="width: 150px;">Operations Count</th>
-                        <th style="width: 250px;">Accessing Process</th>
-                    </tr>
-                </thead>
-                <tbody id="fileStatsTbody">
-                    <tr><td colspan="3"><div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">No File operations logs found.</div></div></td></tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
 
-    <!-- Threat Timeline View -->
-    <div class="tab-view" id="view_timeline" style="display: none; padding: 10px 25px 25px; max-height: 520px; overflow-y: auto;">
-        <div class="seq-timeline" id="seqTimeline">
-            <div class="empty-state">
-                <div class="empty-icon">📈</div>
-                <div class="empty-text">Select an agent or input a query to build a chronological threat timeline.</div>
+        <!-- Sub-view: DNS Analytics -->
+        <div class="sub-tab-view" id="subview_dns_activity" style="display: none; padding: 20px;">
+            <div class="stat-grid" id="dnsStatsGrid"></div>
+            <div class="tbl-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Domain</th>
+                            <th style="width: 150px;">Lookup Count</th>
+                            <th style="width: 200px;">Active Querying Agents</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dnsStatsTbody">
+                        <tr><td colspan="3"><div class="empty-state"><div class="empty-icon"><i data-lucide="bar-chart-2"></i></div><div class="empty-text">No DNS activity logs found.</div></div></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Sub-view: File Analytics -->
+        <div class="sub-tab-view" id="subview_file_activity" style="display: none; padding: 20px;">
+            <div class="stat-grid" id="fileStatsGrid"></div>
+            <div class="tbl-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>File Path</th>
+                            <th style="width: 150px;">Operations Count</th>
+                            <th style="width: 250px;">Accessing Process</th>
+                        </tr>
+                    </thead>
+                    <tbody id="fileStatsTbody">
+                        <tr><td colspan="3"><div class="empty-state"><div class="empty-icon"><i data-lucide="bar-chart-2"></i></div><div class="empty-text">No File operations logs found.</div></div></td></tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Sub-view: Threat Timeline -->
+        <div class="sub-tab-view" id="subview_timeline" style="display: none; padding: 10px 25px 25px; max-height: 500px; overflow-y: auto;">
+            <div class="seq-timeline" id="seqTimeline">
+                <div class="empty-state">
+                    <div class="empty-icon"><i data-lucide="activity"></i></div>
+                    <div class="empty-text">Select an agent or input a query to build a chronological threat timeline.</div>
+                </div>
             </div>
         </div>
     </div>

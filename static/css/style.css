@@ -368,7 +368,7 @@ a:hover { text-decoration: underline; }
 /* ── Stat Cards ───────────────────────────────────────────────── */
 .stats-grid {
     display: grid;
-    grid-template-columns: repeat(6, 1fr);
+    grid-template-columns: repeat(5, 1fr);
     gap: 12px;
 }
 
@@ -379,6 +379,10 @@ a:hover { text-decoration: underline; }
     padding: 16px 18px;
     cursor: default;
     transition: border-color var(--transition);
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    height: 100%;
 }
 .stat-card:hover { border-color: var(--border2); }
 

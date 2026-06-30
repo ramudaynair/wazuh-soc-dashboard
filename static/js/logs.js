@@ -31,6 +31,16 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('prevBtn').addEventListener('click', prevPage);
     document.getElementById('nextBtn').addEventListener('click', nextPage);
 
+    // Parse URL level parameter on load
+    const params = new URLSearchParams(window.location.search);
+    const levelParam = params.get('level');
+    if (levelParam) {
+        const levelSelect = document.getElementById('levelFilter');
+        if (levelSelect) {
+            levelSelect.value = levelParam;
+        }
+    }
+
     // Initial load
     loadLogs();
 

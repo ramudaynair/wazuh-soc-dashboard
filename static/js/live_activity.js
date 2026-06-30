@@ -38,45 +38,101 @@ async function initAgentFilter() {
 // Tab navigation handler
 function setupTabNavigation() {
     const tabs = document.querySelectorAll(".live-tab");
+    const subtabs = document.querySelectorAll(".live-sub-tab");
+
     tabs.forEach(tab => {
         tab.addEventListener("click", () => {
             tabs.forEach(t => t.classList.remove("active"));
             tab.classList.add("active");
-            activeTab = tab.dataset.tab;
+            
             currentPage = 1;
+            const tabName = tab.dataset.tab;
             
-            // Update panel title
-            const titles = {
-                processes: "🚀 Live Process Creation Events (Event ID 1)",
-                dns: "🌐 Live DNS Queries (Event ID 22)",
-                files: "📁 Live File Creation Events (Event ID 11)",
-                registry: "🧠 Live Registry Modifications (Event ID 13)",
-                network: "🔌 Live Network Connections (Event ID 3)",
-                access: "🔒 Live Process Access Events (Event ID 10)",
-                advanced: "🔍 Advanced Sysmon Event Log Viewer",
-                tree: "🌳 Reconstructed Endpoint Process Tree",
-                dns_activity: "📊 Domain Query Analytics",
-                file_activity: "📊 File Operation Metrics",
-                timeline: "📈 Chronological Threat Activity Timeline"
-            };
-            document.getElementById("panelTitle").textContent = titles[activeTab] || "Live Telemetry";
-            
-            // Toggle view panels
-            document.querySelectorAll(".tab-view").forEach(view => {
-                view.style.display = "none";
-            });
-            const activeView = document.getElementById(`view_${activeTab}`);
-            if (activeView) activeView.style.display = "block";
-            
-            // Toggle pagination footer visibility
-            const pag = document.getElementById("livePagination");
-            if (activeTab === "tree" || activeTab === "dns_activity" || activeTab === "file_activity" || activeTab === "timeline") {
+            if (tabName === "advanced") {
+                const activeSub = document.querySelector(".live-sub-tab.active");
+                const subtabName = activeSub ? activeSub.dataset.subtab : "feed";
+                switchToSubtab(subtabName);
+            } else {
+                activeTab = tabName;
+                
+                document.querySelectorAll(".tab-view").forEach(view => {
+                    view.style.display = "none";
+                });
+                const activeView = document.getElementById(`view_${tabName}`);
+                if (activeView) activeView.style.display = "block";
+                
+                const titles = {
+                    processes: "Live Process Creation Events (Event ID 1)",
+                    dns: "Live DNS Queries (Event ID 22)",
+                    files: "Live File Creation Events (Event ID 11)",
+                    registry: "Live Registry Modifications (Event ID 13)",
+                    network: "Live Network Connections (Event ID 3)"
+                };
+                document.getElementById("panelTitle").textContent = titles[tabName] || "Live Telemetry";
+                
+                const pag = document.getElementById("livePagination");
+                if (pag) pag.style.display = "flex";
+                
+                fetchTelemetry();
+            }
+        });
+    });
+
+    function switchToSubtab(subtabName) {
+        subtabs.forEach(st => {
+            if (st.dataset.subtab === subtabName) st.classList.add("active");
+            else st.classList.remove("active");
+        });
+
+        activeTab = subtabName === "feed" ? "advanced" : subtabName;
+        currentPage = 1;
+
+        document.querySelectorAll(".tab-view").forEach(view => {
+            view.style.display = "none";
+        });
+        const viewAdvanced = document.getElementById("view_advanced");
+        if (viewAdvanced) viewAdvanced.style.display = "block";
+
+        document.querySelectorAll(".sub-tab-view").forEach(sv => {
+            sv.style.display = "none";
+        });
+        const subIdMap = {
+            feed: "subview_feed",
+            tree: "subview_tree",
+            access: "subview_access",
+            dns_activity: "subview_dns_activity",
+            file_activity: "subview_file_activity",
+            timeline: "subview_timeline"
+        };
+        const activeSubView = document.getElementById(subIdMap[subtabName]);
+        if (activeSubView) activeSubView.style.display = "block";
+
+        const titles = {
+            feed: "Advanced Sysmon Event Log Viewer",
+            tree: "Reconstructed Endpoint Process Tree",
+            access: "Live Process Access Events (Event ID 10)",
+            dns_activity: "Domain Query Analytics",
+            file_activity: "File Operation Metrics",
+            timeline: "Chronological Threat Activity Timeline"
+        };
+        document.getElementById("panelTitle").textContent = titles[subtabName] || "Advanced Analysis";
+
+        const pag = document.getElementById("livePagination");
+        if (pag) {
+            if (subtabName === "tree" || subtabName === "dns_activity" || subtabName === "file_activity" || subtabName === "timeline") {
                 pag.style.display = "none";
             } else {
                 pag.style.display = "flex";
             }
-            
-            fetchTelemetry();
+        }
+
+        fetchTelemetry();
+    }
+
+    subtabs.forEach(subtab => {
+        subtab.addEventListener("click", (e) => {
+            e.stopPropagation();
+            switchToSubtab(subtab.dataset.subtab);
         });
     });
 }
