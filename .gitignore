@@ -9,7 +9,8 @@ scratch*.py
 scratch_*.py
 
 # Local state data
-wazuh-monitor/data/
+data/
+
 
 
 
