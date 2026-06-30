@@ -48,11 +48,48 @@ async function loadAll() {
 async function loadAuthStats() {
     try {
         const stats = await api('/api/security/stats');
+        
         document.getElementById('authFailedCount').textContent = stats.failed_logins || 0;
-        document.getElementById('authSuccessCount').textContent = stats.successful_logins || 0;
         document.getElementById('authLockedCount').textContent = stats.locked_accounts || 0;
+        document.getElementById('authRemoteCount').textContent = stats.remote_logins || 0;
+        document.getElementById('authPrivilegedCount').textContent = stats.privileged_logins || 0;
+
+        // Render Top Failed Users Table
+        const topUsersTbody = document.getElementById('topUsersTbody');
+        if (topUsersTbody) {
+            const users = Object.entries(stats.failures_by_user || {});
+            if (users.length === 0) {
+                topUsersTbody.innerHTML = `<tr><td colspan="2"><div class="empty-state" style="padding: 10px;"><div class="empty-text">No failures recorded</div></div></td></tr>`;
+            } else {
+                topUsersTbody.innerHTML = users.map(([usr, count]) => `
+                    <tr>
+                        <td class="primary font-semibold" style="font-size:13px;">${escapeHtml(usr)}</td>
+                        <td style="text-align: right; font-weight: 700; color: var(--red); font-size:13px;">${count}</td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        // Render Top Failed IPs Table
+        const topIpsTbody = document.getElementById('topIpsTbody');
+        if (topIpsTbody) {
+            const ips = Object.entries(stats.failures_by_ip || {});
+            if (ips.length === 0) {
+                topIpsTbody.innerHTML = `<tr><td colspan="2"><div class="empty-state" style="padding: 10px;"><div class="empty-text">No failures recorded</div></div></td></tr>`;
+            } else {
+                topIpsTbody.innerHTML = ips.map(([ip, count]) => `
+                    <tr>
+                        <td class="mono font-semibold" style="font-size:12px; color: var(--blue);">${escapeHtml(ip)}</td>
+                        <td style="text-align: right; font-weight: 700; color: var(--red); font-size:13px;">${count}</td>
+                    </tr>
+                `).join('');
+            }
+        }
+
+        if (window.lucide) lucide.createIcons();
+
     } catch (err) {
-        const ids = ['authFailedCount', 'authSuccessCount', 'authLockedCount'];
+        const ids = ['authFailedCount', 'authLockedCount', 'authRemoteCount', 'authPrivilegedCount'];
         ids.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.textContent = '—';
@@ -70,7 +107,7 @@ async function loadAuthEvents() {
     let query = `/api/security/alerts?category=authentication&limit=${pageSize}&offset=${offset}`;
     if (search) query += `&search=${encodeURIComponent(search)}`;
     
-    // Status filtering in frontend helper or backend query. Let's filter on search/status
+    // Status filtering in query
     if (status) query += `&search=${encodeURIComponent(status)}`;
 
     try {
@@ -85,46 +122,49 @@ async function loadAuthEvents() {
                 <tr>
                     <td colspan="5">
                         <div class="empty-state">
-                            <div class="empty-icon">🔍</div>
+                            <div class="empty-icon"><i data-lucide="shield-alert"></i></div>
                             <div class="empty-text">No authentication logs found</div>
                         </div>
                     </td>
                 </tr>`;
             updatePagination();
+            if (window.lucide) lucide.createIcons();
             return;
         }
 
         tbody.innerHTML = items.map(a => {
             let statusBadge = '';
             if (a.auth_status === 'lockout') {
-                statusBadge = '<span class="status-badge state-offline">🔒 LOCKOUT</span>';
+                statusBadge = '<span class="status-badge state-offline" style="background:rgba(248,81,73,0.1); border: 1px solid var(--red); color: var(--red);">🔒 LOCKOUT</span>';
             } else if (a.auth_status === 'success') {
-                statusBadge = '<span class="status-badge state-online">✓ SUCCESS</span>';
+                statusBadge = '<span class="status-badge state-online" style="background:rgba(63,185,80,0.1); border: 1px solid var(--green); color: var(--green);">✓ SUCCESS</span>';
             } else {
-                statusBadge = '<span class="status-badge state-warning">✕ FAILED</span>';
+                statusBadge = '<span class="status-badge state-warning" style="background:rgba(240,136,62,0.1); border: 1px solid var(--orange); color: var(--orange);">✕ FAILED</span>';
             }
 
             return `
                 <tr onclick='openDrawer(${JSON.stringify(a).replace(/'/g, "&#39;")})'>
                     <td>${statusBadge}</td>
-                    <td class="primary font-bold">${escapeHtml(a.username || '—')}</td>
+                    <td class="primary font-semibold">${escapeHtml(a.username || '—')}</td>
                     <td class="mono">${escapeHtml(a.src_ip || '—')}</td>
-                    <td>${escapeHtml(a.agent.name || 'manager')} <span class="rule-id" style="font-size:11px">${escapeHtml(a.agent.id)}</span></td>
-                    <td class="mono">${formatTime(a.timestamp)}</td>
+                    <td>${escapeHtml(a.agent.name || 'manager')} <span class="rule-id" style="font-size:11px; color: var(--text-muted); font-family: monospace;">(${escapeHtml(a.agent.id)})</span></td>
+                    <td class="mono" style="font-size: 11px; color: var(--text-muted);">${formatTime(a.timestamp)}</td>
                 </tr>`;
         }).join('');
 
         updatePagination();
+        if (window.lucide) lucide.createIcons();
     } catch (err) {
         tbody.innerHTML = `
             <tr>
                 <td colspan="5">
                     <div class="empty-state">
-                        <div class="empty-icon">✕</div>
+                        <div class="empty-icon"><i data-lucide="shield-alert"></i></div>
                         <div class="empty-text" style="color:var(--red)">Failed to load authentication events</div>
                     </div>
                 </td>
             </tr>`;
+        if (window.lucide) lucide.createIcons();
         throw err;
     }
 }
@@ -156,7 +196,7 @@ function resetFilters() {
     document.getElementById('statusFilter').value = '';
     document.getElementById('searchInput').value = '';
     currentPage = 1;
-    loadAuthEvents();
+    loadAll();
 }
 
 function debounce(func, wait) {

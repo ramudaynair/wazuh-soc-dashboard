@@ -7,6 +7,7 @@
     <title>{% block title %}Wazuh Monitor{% endblock %}</title>
     <link rel="stylesheet" href="/static/css/style.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
     {% block head %}{% endblock %}
 </head>
 <body>
@@ -15,7 +16,7 @@
         <!-- ═══ SIDEBAR ═══ -->
         <aside class="sidebar" id="sidebar">
             <div class="sidebar-logo">
-                <div class="sidebar-logo-icon">🛡</div>
+                <div class="sidebar-logo-icon" style="display: flex; align-items: center; justify-content: center;"><i data-lucide="shield" style="width: 18px; height: 18px; color: var(--blue);"></i></div>
                 <span class="sidebar-logo-text">Wazuh Monitor</span>
             </div>
 
@@ -30,6 +31,13 @@
                         <rect x="10" y="7" width="7" height="7" rx="1.5"/>
                     </svg>
                     <span class="sidebar-link-label">Dashboard</span>
+                </a>
+
+                <a href="/vulnerabilities" class="sidebar-link {{ 'active' if page == 'vulnerabilities' }}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                    </svg>
+                    <span class="sidebar-link-label">Vulnerabilities</span>
                 </a>
 
                 <a href="/incidents" class="sidebar-link {{ 'active' if page == 'incidents' }}">
@@ -58,6 +66,13 @@
                 </a>
 
                 <div class="sidebar-section-label">Security Monitoring</div>
+
+                <a href="/live_activity" class="sidebar-link {{ 'active' if page == 'live_activity' }}">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+                        <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>
+                    </svg>
+                    <span class="sidebar-link-label">Live Activity</span>
+                </a>
 
                 <a href="/authentication" class="sidebar-link {{ 'active' if page == 'authentication' }}">
                     <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">

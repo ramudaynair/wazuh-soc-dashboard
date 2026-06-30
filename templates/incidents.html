@@ -19,6 +19,13 @@
             <option value="Medium">Medium</option>
             <option value="Low">Low</option>
         </select>
+        <select id="statusFilter" class="filter-select" onchange="loadIncidents()">
+            <option value="">All Statuses</option>
+            <option value="Open">Open</option>
+            <option value="Investigating">Investigating</option>
+            <option value="Resolved">Resolved</option>
+            <option value="False Positive">False Positive</option>
+        </select>
         <input type="text" id="hostFilter" class="filter-input" placeholder="Search by host..." oninput="loadIncidents()">
     </div>
 
@@ -31,15 +38,16 @@
                     <th>Incident ID</th>
                     <th>Title</th>
                     <th>Host</th>
+                    <th>Status</th>
                     <th>Timestamp</th>
                     <th>Actions</th>
                 </tr>
             </thead>
             <tbody id="incidentsTbody">
                 <tr>
-                    <td colspan="6">
+                    <td colspan="7">
                         <div class="empty-state">
-                            <div class="empty-icon">🔍</div>
+                            <div class="empty-icon"><i data-lucide="search"></i></div>
                             <div class="empty-text">Loading incidents...</div>
                         </div>
                     </td>
@@ -66,17 +74,46 @@
     let allIncidents = [];
 
     document.addEventListener("DOMContentLoaded", () => {
+        // Read severity query parameter from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const severityParam = urlParams.get('severity');
+        if (severityParam) {
+            const filterEl = document.getElementById('severityFilter');
+            if (filterEl) {
+                const capitalized = severityParam.charAt(0).toUpperCase() + severityParam.slice(1).toLowerCase();
+                filterEl.value = capitalized;
+            }
+        }
+
         loadIncidents();
+
+        // Auto-refresh every 30 seconds
+        if (typeof startAutoRefresh === "function") {
+            startAutoRefresh(30, () => {
+                loadIncidents();
+            });
+        }
     });
+
+    function refreshPage() {
+        loadIncidents();
+    }
 
     async function loadIncidents() {
         try {
-            const res = await fetch("/api/incidents?limit=100&offset=0");
+            const statusVal = document.getElementById("statusFilter").value;
+            const res = await fetch(`/api/incidents?limit=100&offset=0${statusVal ? '&status=' + encodeURIComponent(statusVal) : ''}`);
             const data = await res.json();
             allIncidents = data.items || [];
             filterAndRender();
+            if (typeof markRefreshSuccess === "function") {
+                markRefreshSuccess();
+            }
         } catch (err) {
             console.error("Failed to load incidents:", err);
+            if (typeof markRefreshFailure === "function") {
+                markRefreshFailure(err.message);
+            }
         }
     }
 
@@ -108,13 +145,14 @@
         if (!items || items.length === 0) {
             tbody.innerHTML = `
                 <tr>
-                    <td colspan="6">
+                    <td colspan="7">
                         <div class="empty-state">
-                            <div class="empty-icon">🛡️</div>
+                            <div class="empty-icon"><i data-lucide="shield-off"></i></div>
                             <div class="empty-text">No security incidents correlated</div>
                         </div>
                     </td>
                 </tr>`;
+            if (window.lucide) lucide.createIcons();
             return;
         }
 
@@ -125,19 +163,26 @@
             else if (inc.severity === "Medium") badgeClass = "badge-medium";
             else if (inc.severity === "Low") badgeClass = "badge-low";
 
+            let statusColor = "var(--text-muted)";
+            if (inc.status === "Open") statusColor = "var(--red)";
+            else if (inc.status === "Investigating") statusColor = "var(--orange)";
+            else if (inc.status === "Resolved") statusColor = "var(--green)";
+
             return `
                 <tr onclick="showIncidentDetail('${inc.id}')">
                     <td><span class="badge ${badgeClass}">${inc.severity}</span></td>
-                    <td class="mono">${inc.id}</td>
+                    <td class="mono font-semibold" style="color:var(--blue);">${inc.id}</td>
                     <td class="primary" style="font-weight:600">${inc.title}</td>
                     <td>${inc.host}</td>
-                    <td>${formatTime(inc.timestamp)}</td>
+                    <td><span class="badge" style="background: rgba(255,255,255,0.02); color: ${statusColor}; border: 1px solid var(--border); font-size: 11px;">${inc.status || 'Open'}</span></td>
+                    <td class="mono" style="font-size: 11px; color: var(--text-muted);">${formatTime(inc.timestamp)}</td>
                     <td>
                         <button class="page-btn" style="border-color:var(--wazuh); color:var(--wazuh)">Investigate</button>
                     </td>
                 </tr>
             `;
         }).join("");
+        if (window.lucide) lucide.createIcons();
     }
 
     function updatePagination(start, end) {

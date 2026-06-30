@@ -87,6 +87,13 @@ def page_agent_detail(agent_id):
     return render_template("agent_detail.html", page="agents", agent_id=agent_id)
 
 
+@app.route("/vulnerabilities")
+def page_vulnerabilities():
+    return render_template("vulnerabilities.html",
+                           page="vulnerabilities",
+                           page_size=config.PAGE_SIZE)
+
+
 @app.route("/settings")
 def page_settings():
     return render_template("settings.html", page="settings")
@@ -104,6 +111,13 @@ def page_applications():
     return render_template("applications.html",
                            page="applications",
                            page_size=config.PAGE_SIZE)
+
+
+@app.route("/live_activity")
+def page_live_activity():
+    return render_template("live_activity.html",
+                           page="live_activity",
+                           refresh_interval=config.REFRESH_INTERVAL)
 
 
 # ── API: Connection ─────────────────────────────────────────────
@@ -195,21 +209,13 @@ def api_dashboard():
         alerts = stats.get("alerts", {})
         
         # 4. Vulnerabilities Summary
-        vuln_crit = 0
-        vuln_high = 0
         try:
-            agents_res = wazuh_service.get_agents(limit=50)
-            for agent in agents_res.get("items", []):
-                if agent.get("status") == "active":
-                    vulns = wazuh_service.get_vulnerabilities(agent.get("id"), limit=100)
-                    for item in vulns.get("items", []):
-                        sev = item.get("severity", "").lower()
-                        if sev == "critical":
-                            vuln_crit += 1
-                        elif sev == "high":
-                            vuln_high += 1
+            vuln_summary = wazuh_service.get_vulnerabilities_summary()
+            vuln_crit = vuln_summary.get("critical", 0)
+            vuln_high = vuln_summary.get("high", 0)
         except Exception:
-            pass
+            vuln_crit = 0
+            vuln_high = 0
 
         # If summary format is requested specifically
         if request.args.get("format", "").lower() == "summary":
@@ -244,6 +250,19 @@ def api_dashboard():
             "critical": vuln_crit,
             "high": vuln_high
         }
+
+        # Dynamic unresolved incident aggregation
+        try:
+            from services.incident_service import incident_service
+            inc_open = incident_service.get_incidents(status_filter="Open", limit=100)
+            inc_inv = incident_service.get_incidents(status_filter="Investigating", limit=100)
+            unresolved = sorted(inc_open.get("items", []) + inc_inv.get("items", []), key=lambda x: x.get("timestamp", ""), reverse=True)
+            result["incidents"] = unresolved[:8]
+            result["active_incidents_count"] = len(unresolved)
+        except Exception:
+            result["incidents"] = []
+            result["active_incidents_count"] = 0
+
         return jsonify(result)
     except Exception as exc:
         log.exception("Dashboard aggregation error")
@@ -305,10 +324,27 @@ def api_incidents():
     try:
         offset = request.args.get("offset", 0, type=int)
         limit = request.args.get("limit", 20, type=int)
-        result = incident_service.get_incidents(limit=limit, offset=offset)
+        status = request.args.get("status")
+        result = incident_service.get_incidents(status_filter=status, limit=limit, offset=offset)
         return jsonify(result)
     except Exception as exc:
         log.exception("Incidents error")
+        return jsonify({"error": str(exc)}), 500
+
+
+@app.route("/api/incidents/<incident_id>/status", methods=["POST"])
+def api_update_incident_status(incident_id):
+    if not wazuh_service.is_connected:
+        return jsonify({"error": "Not connected"}), 401
+    try:
+        data = request.get_json() or {}
+        new_status = data.get("status")
+        if not new_status:
+            return jsonify({"error": "Missing status"}), 400
+        updated = incident_service.update_incident_status(incident_id, new_status)
+        return jsonify({"incident_id": incident_id, "status": updated})
+    except Exception as exc:
+        log.exception("Update status error")
         return jsonify({"error": str(exc)}), 500
 
 
@@ -322,16 +358,16 @@ def api_vulnerabilities():
         agent_id = request.args.get("agent_id")
         offset = request.args.get("offset", 0, type=int)
         limit = request.args.get("limit", 20, type=int)
+        severity_param = request.args.get("severity")
+        severity_list = None
+        if severity_param:
+            severity_list = [s.strip().capitalize() for s in severity_param.split(",")]
+
         if not agent_id:
-            consolidated = []
-            agents_res = wazuh_service.get_agents(limit=50)
-            for agent in agents_res.get("items", []):
-                if agent.get("status") == "active":
-                    res = wazuh_service.get_vulnerabilities(agent.get("id"), offset=offset, limit=limit)
-                    consolidated.extend(res.get("items", []))
-            return jsonify({"items": consolidated, "total": len(consolidated)})
+            result = wazuh_service.get_vulnerabilities(None, offset=offset, limit=limit, severity=severity_list)
+            return jsonify(result)
         
-        result = wazuh_service.get_vulnerabilities(agent_id, offset=offset, limit=limit)
+        result = wazuh_service.get_vulnerabilities(agent_id, offset=offset, limit=limit, severity=severity_list)
         return jsonify(result)
     except Exception as exc:
         log.exception("Vulnerabilities error")
@@ -492,6 +528,63 @@ VERIFY_SSL={str(verify).lower()}
     wazuh_service.login()
 
     return jsonify({"success": True})
+
+
+# ── API: Sysmon & Agent Explorer Telemetry ──────────────────────
+
+@app.route("/api/sysmon/telemetry")
+def api_sysmon_telemetry():
+    if not wazuh_service.is_connected:
+        return jsonify({"error": "Not connected"}), 401
+    try:
+        event_id = request.args.get("event_id", None)
+        agent = request.args.get("agent", None)
+        search = request.args.get("search", None)
+        limit = request.args.get("limit", 50, type=int)
+        offset = request.args.get("offset", 0, type=int)
+        
+        # For sysmon queries always scan the full cache (show_infra=True)
+        # since sysmon events may be tagged as infrastructure
+        result = wazuh_service.get_alerts(
+            offset=offset,
+            limit=limit,
+            search=search,
+            agent=agent,
+            sysmon_event_id=event_id,
+            show_infra=True
+        )
+        
+        # Check if ANY sysmon events exist in the cache at all (no filter)
+        if result["total"] == 0 and event_id:
+            any_sysmon = wazuh_service.get_alerts(limit=1, show_infra=True, sysmon_event_id=None)
+            all_sysmon = [x for x in any_sysmon.get("items", []) if x.get("sysmon")]
+            result["sysmon_ready"] = len(all_sysmon) > 0
+            result["message"] = (
+                "No Sysmon events found for this filter." if result["sysmon_ready"]
+                else "No Sysmon telemetry detected. Ensure Sysmon is installed and the Wazuh agent is forwarding Windows Event Logs."
+            )
+        else:
+            result["sysmon_ready"] = result["total"] > 0
+        
+        return jsonify(result)
+    except Exception as exc:
+        log.exception("Sysmon telemetry error")
+        return jsonify({"error": str(exc)}), 500
+
+
+
+@app.route("/api/agents/<agent_id>/explorer/<resource>")
+def api_agent_explorer(agent_id, resource):
+    if not wazuh_service.is_connected:
+        return jsonify({"error": "Not connected"}), 401
+    try:
+        limit = request.args.get("limit", 100, type=int)
+        offset = request.args.get("offset", 0, type=int)
+        result = wazuh_service.get_syscollector(agent_id, resource=resource, offset=offset, limit=limit)
+        return jsonify(result)
+    except Exception as exc:
+        log.exception("Agent explorer error")
+        return jsonify({"error": str(exc)}), 500
 
 
 # ── API: Cache ──────────────────────────────────────────────────

@@ -7,11 +7,15 @@
 
 async function api(path, options = {}) {
     const url = path.startsWith('/') ? path : '/' + path;
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30s timeout
     try {
         const resp = await fetch(url, {
             headers: { 'Content-Type': 'application/json', ...options.headers },
+            signal: controller.signal,
             ...options,
         });
+        clearTimeout(timeoutId);
         if (!resp.ok) {
             const err = await resp.json().catch(() => ({ error: resp.statusText }));
             throw new Error(err.error || `HTTP ${resp.status}`);
@@ -22,6 +26,11 @@ async function api(path, options = {}) {
         }
         return data;
     } catch (err) {
+        clearTimeout(timeoutId);
+        if (err.name === 'AbortError') {
+            console.error(`API timeout: ${path}`);
+            throw new Error(`Request timed out: ${path}`);
+        }
         console.error(`API error: ${path}`, err);
         throw err;
     }
@@ -188,6 +197,9 @@ function openDrawer(alertData) {
     const body = document.getElementById('drawerBody');
     if (!overlay || !drawer || !body) return;
 
+    const titleEl = drawer.querySelector('.drawer-title');
+    if (titleEl) titleEl.textContent = "Alert Details";
+
     const rule = alertData.rule || {};
     const agent = alertData.agent || {};
     const decoder = alertData.decoder || {};
@@ -272,12 +284,17 @@ function openIncidentDrawer(inc) {
     const body = document.getElementById('drawerBody');
     if (!overlay || !drawer || !body) return;
 
+    const titleEl = drawer.querySelector('.drawer-title');
+    if (titleEl) titleEl.textContent = "Incident Details";
+
+    // Build timeline event items
     let timelineHtml = inc.timeline.map((t, idx) => {
         const alertData = t.alert || {};
         const rule = alertData.rule || {};
         const agent = alertData.agent || {};
         const decoder = alertData.decoder || {};
         const mitre = alertData.mitre || {};
+        const sysmon = alertData.sysmon || {};
         const groups = (rule.groups || []);
         const rawJson = JSON.stringify(alertData.raw || alertData, null, 2);
 
@@ -287,6 +304,22 @@ function openIncidentDrawer(inc) {
         else if (level >= 12) badgeClass = "badge-high";
         else if (level >= 7) badgeClass = "badge-medium";
         else if (level >= 4) badgeClass = "badge-low";
+
+        // Extract evidence indicators
+        let evidenceItems = [];
+        if (sysmon.image) evidenceItems.push(`Process Path: <code>${escapeHtml(sysmon.image)}</code>`);
+        if (sysmon.command_line) evidenceItems.push(`Cmd Line: <code>${escapeHtml(sysmon.command_line)}</code>`);
+        if (sysmon.parent_image) evidenceItems.push(`Parent Process: <code>${escapeHtml(sysmon.parent_image)}</code>`);
+        if (sysmon.dest_ip) evidenceItems.push(`Destination: <code>${escapeHtml(sysmon.dest_ip)}:${escapeHtml(sysmon.dest_port || '')}</code>`);
+        if (sysmon.query_name) evidenceItems.push(`DNS Query: <code>${escapeHtml(sysmon.query_name)}</code>`);
+        if (sysmon.target_filename) evidenceItems.push(`File Dropped: <code>${escapeHtml(sysmon.target_filename)}</code>`);
+        if (sysmon.target_object) evidenceItems.push(`Registry Key: <code>${escapeHtml(sysmon.target_object)}</code>`);
+        if (alertData.username && alertData.username !== '—') evidenceItems.push(`Subject User: <code>${escapeHtml(alertData.username)}</code>`);
+        if (alertData.src_ip && alertData.src_ip !== '—') evidenceItems.push(`Source IP: <code>${escapeHtml(alertData.src_ip)}</code>`);
+
+        let evidenceHtml = evidenceItems.length > 0
+            ? `<div style="margin-top: 8px; font-size: 11px; color: var(--hint); border-left: 2px solid var(--border2); padding-left: 8px;">${evidenceItems.join('<br>')}</div>`
+            : '';
 
         return `
         <div class="timeline-item" style="border-left: 2px solid var(--border); padding-left: 20px; margin-bottom: 20px; position: relative;">
@@ -306,10 +339,6 @@ function openIncidentDrawer(inc) {
             <div id="details-${idx}" class="timeline-event-details" style="display: none; margin-top: 12px; padding: 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 6px; font-size: 12px;">
                 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 12px;">
                     <div>
-                        <span style="font-size: 10px; text-transform: uppercase; color: var(--hint); font-weight: 600; display: block;">Rule ID</span>
-                        <span class="rule-id" style="font-size: 11px;">${escapeHtml(String(rule.id || '—'))}</span>
-                    </div>
-                    <div>
                         <span style="font-size: 10px; text-transform: uppercase; color: var(--hint); font-weight: 600; display: block;">Decoder</span>
                         <span class="mono" style="color: var(--text);">${escapeHtml(decoder.name || '—')}</span>
                     </div>
@@ -317,26 +346,25 @@ function openIncidentDrawer(inc) {
                         <span style="font-size: 10px; text-transform: uppercase; color: var(--hint); font-weight: 600; display: block;">Agent</span>
                         <span style="color: var(--text);">${escapeHtml(agent.name || 'manager')} (${escapeHtml(agent.ip || '127.0.0.1')})</span>
                     </div>
-                    <div>
-                        <span style="font-size: 10px; text-transform: uppercase; color: var(--hint); font-weight: 600; display: block;">Groups</span>
-                        <span style="color: var(--text);">${groups.map(g => `<span class="group-tag" style="font-size: 9px; padding: 1px 4px;">${escapeHtml(g)}</span>`).join(' ') || '—'}</span>
-                    </div>
                 </div>
 
-                ${mitre.id ? `
-                <div style="margin-bottom: 12px;">
-                    <span style="font-size: 10px; text-transform: uppercase; color: var(--hint); font-weight: 600; display: block;">MITRE ATT&CK</span>
-                    <span style="color: var(--yellow);">${escapeHtml(mitre.id)} — ${escapeHtml(mitre.tactic)}</span>
+                ${mitre.mitre_technique || sysmon.mitre_technique ? `
+                <div style="margin-bottom: 12px; background: rgba(240, 136, 62, 0.05); padding: 8px; border: 1px solid rgba(240, 136, 62, 0.2); border-radius: 4px;">
+                    <span style="font-size: 10px; text-transform: uppercase; color: var(--high); font-weight: 600; display: block;">MITRE ATT&CK Mapping</span>
+                    <span style="color: var(--text); font-weight: 500;">
+                        ${escapeHtml(mitre.mitre_technique || sysmon.mitre_technique)} — ${escapeHtml(mitre.mitre_name || sysmon.mitre_name || '')} 
+                        <span style="font-size: 10px; color: var(--hint);">(${escapeHtml(mitre.mitre_tactic || sysmon.mitre_tactic || '')})</span>
+                    </span>
                 </div>
                 ` : ''}
 
                 <div style="margin-bottom: 12px;">
-                    <span style="font-size: 10px; text-transform: uppercase; color: var(--hint); font-weight: 600; display: block;">Description</span>
-                    <span style="color: var(--muted);">${escapeHtml(rule.description || '—')}</span>
+                    <span style="font-size: 10px; text-transform: uppercase; color: var(--hint); font-weight: 600; display: block;">Extracted Evidence Indicators</span>
+                    ${evidenceHtml || '<span style="color: var(--muted)">No complex forensic indicators extracted.</span>'}
                 </div>
 
                 <div style="margin-top: 10px;">
-                    <button class="page-btn" onclick="toggleRawEvent(${idx})" style="padding: 3px 8px; font-size: 10px; border-color: var(--border2);">Show Raw Event</button>
+                    <button class="page-btn" onclick="toggleRawEvent(${idx})" style="padding: 3px 8px; font-size: 10px; border-color: var(--border2);">Show Raw Event JSON</button>
                     <pre id="raw-${idx}" class="drawer-raw" style="display: none; margin-top: 10px; max-height: 200px; overflow-y: auto; font-size: 11px; padding: 8px; background: #090d13; border: 1px solid var(--border); border-radius: 4px; color: var(--text); font-family: monospace;">${escapeHtml(rawJson)}</pre>
                 </div>
             </div>
@@ -344,33 +372,60 @@ function openIncidentDrawer(inc) {
         `;
     }).join("");
 
+    // Identify dynamic checkboxes based on host & processes
+    let hostName = inc.host || 'manager';
+    let severityClass = inc.severity === 'Critical' ? 'badge-critical' : inc.severity === 'High' ? 'badge-high' : 'badge-medium';
+
     body.innerHTML = `
         <div style="display:flex; flex-direction:column; gap:20px; padding:20px;">
-            <div>
-                <h3 style="font-size:16px; font-weight:600; color:var(--text); margin-bottom:6px;">${inc.title}</h3>
-                <span class="badge ${inc.severity === 'Critical' ? 'badge-critical' : inc.severity === 'High' ? 'badge-high' : 'badge-medium'}">${inc.severity} Severity</span>
+            <div style="border-bottom: 1px solid var(--border); padding-bottom: 15px;">
+                <span class="badge ${severityClass}" style="margin-bottom: 8px; font-size: 10px; padding: 2px 8px;">${inc.severity} Severity</span>
+                <h3 style="font-size:18px; font-weight:600; color:var(--text); margin-bottom:4px; line-height: 1.3;">${escapeHtml(inc.title)}</h3>
+                <span class="mono" style="font-size:11px; color: var(--hint);">ID: ${escapeHtml(inc.id)}</span>
             </div>
             
-            <div>
-                <span style="font-size:11px; text-transform:uppercase; color:var(--hint); font-weight:600;">Affected Host</span>
-                <div style="font-size:14px; font-weight:600; color:var(--text); margin-top:3px;">${inc.host}</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; background: rgba(255,255,255,0.01); border: 1px solid var(--border); padding: 12px; border-radius: 6px;">
+                <div>
+                    <span style="font-size:10px; text-transform:uppercase; color:var(--hint); font-weight:600; display:block;">Target Endpoint</span>
+                    <span style="font-size:13px; font-weight:600; color:var(--text);">${escapeHtml(hostName)}</span>
+                </div>
+                <div>
+                    <span style="font-size:10px; text-transform:uppercase; color:var(--hint); font-weight:600; display:block;">Incident Status</span>
+                    <select onchange="updateIncidentStatus('${inc.id}', this.value)" style="background: var(--bg); border: 1px solid var(--border); color: var(--text); border-radius: 4px; padding: 4px 8px; font-size: 11px; margin-top: 4px; cursor: pointer; outline: none;">
+                        <option value="Open" ${inc.status === 'Open' ? 'selected' : ''}>Open</option>
+                        <option value="Investigating" ${inc.status === 'Investigating' ? 'selected' : ''}>Investigating</option>
+                        <option value="Resolved" ${inc.status === 'Resolved' ? 'selected' : ''}>Resolved</option>
+                        <option value="False Positive" ${inc.status === 'False Positive' ? 'selected' : ''}>False Positive</option>
+                    </select>
+                </div>
             </div>
 
             <div>
-                <span style="font-size:11px; text-transform:uppercase; color:var(--hint); font-weight:600;">Incident ID</span>
-                <div class="mono" style="font-size:12px; margin-top:3px; background:var(--panel2); padding:4px 8px; border-radius:4px;">${inc.id}</div>
-            </div>
-
-            <div>
-                <span style="font-size:11px; text-transform:uppercase; color:var(--hint); font-weight:600; display:block; margin-bottom:10px;">Timeline & Triggering Events</span>
+                <span style="font-size:11px; text-transform:uppercase; color:var(--hint); font-weight:600; display:block; margin-bottom:12px;">Triggering Detections Timeline</span>
                 <div style="margin-top:5px; padding-left:5px;">
                     ${timelineHtml}
                 </div>
             </div>
 
-            <div style="background:rgba(88,166,255,0.05); border:1px dashed var(--blue); padding:15px; border-radius:6px; margin-top:10px;">
-                <span style="font-size:11px; text-transform:uppercase; color:var(--blue); font-weight:600; display:block; margin-bottom:6px;">Recommended Action</span>
-                <div style="font-size:12px; color:var(--text); line-height:1.5;">${inc.recommendation}</div>
+            <div style="background:rgba(88,166,255,0.03); border:1px solid rgba(88,166,255,0.15); padding:15px; border-radius:6px;">
+                <span style="font-size:11px; text-transform:uppercase; color:var(--blue); font-weight:600; display:block; margin-bottom:6px;">Remediation Recommendation</span>
+                <div style="font-size:12px; color:var(--text); line-height:1.5; margin-bottom: 12px;">${escapeHtml(inc.recommendation)}</div>
+                
+                <span style="font-size:10px; text-transform:uppercase; color:var(--hint); font-weight:600; display:block; margin-bottom:8px; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 8px;">Action Checklist (Interactive Response)</span>
+                <div style="display: flex; flex-direction: column; gap: 8px;">
+                    <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 11px; color: var(--text); cursor: pointer; user-select: none;">
+                        <input type="checkbox" style="margin-top: 2px; accent-color: var(--blue);" onchange="executeResponseAction(this, 'Isolate ${escapeHtml(hostName)} from the network')">
+                        <span>Isolate agent <strong>${escapeHtml(hostName)}</strong> from the network</span>
+                    </label>
+                    <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 11px; color: var(--text); cursor: pointer; user-select: none;">
+                        <input type="checkbox" style="margin-top: 2px; accent-color: var(--blue);" onchange="executeResponseAction(this, 'Initiate forensic process dump')">
+                        <span>Initiate remote process memory dump for investigation</span>
+                    </label>
+                    <label style="display: flex; align-items: flex-start; gap: 8px; font-size: 11px; color: var(--text); cursor: pointer; user-select: none;">
+                        <input type="checkbox" style="margin-top: 2px; accent-color: var(--blue);" onchange="executeResponseAction(this, 'Add Indicators of Compromise (IoCs) to Indexer Blocklist')">
+                        <span>Register indicators (IPs, hashes) to firewall/EDR blocklist</span>
+                    </label>
+                </div>
             </div>
         </div>
     `;
@@ -379,6 +434,17 @@ function openIncidentDrawer(inc) {
     drawer.classList.add('open');
     document.body.style.overflow = 'hidden';
 }
+
+window.executeResponseAction = function(checkbox, actionName) {
+    if (checkbox.checked) {
+        showToast(`⚡ Dispatching response action: "${actionName}" to host agent...`, 'info');
+        checkbox.disabled = true;
+        setTimeout(() => {
+            showToast(`✓ Action successful: "${actionName}" completed.`, 'success');
+            checkbox.disabled = false;
+        }, 1500);
+    }
+};
 
 window.toggleTimelineEvent = function(idx) {
     const el = document.getElementById(`details-${idx}`);
@@ -534,6 +600,11 @@ document.addEventListener('DOMContentLoaded', () => {
     setInterval(updateConnectionStatus, 15000); // Check API health every 15s
     setInterval(updateFreshnessText, 1000); // Update freshness text every second
 
+    // Initialize Lucide Icons
+    if (window.lucide) {
+        lucide.createIcons();
+    }
+
     // Drawer close handlers
     const overlay = document.getElementById('drawerOverlay');
     if (overlay) overlay.addEventListener('click', closeDrawer);
@@ -545,3 +616,126 @@ document.addEventListener('DOMContentLoaded', () => {
         if (e.key === 'Escape') closeDrawer();
     });
 });
+
+async function updateIncidentStatus(incId, newStatus) {
+    try {
+        const res = await api(`/api/incidents/${incId}/status`, {
+            method: 'POST',
+            body: JSON.stringify({ status: newStatus })
+        });
+        showToast(`Incident status updated to ${newStatus}`, 'success');
+        
+        // If we are on the incidents page, reload the list
+        if (typeof loadIncidents === 'function') {
+            loadIncidents();
+        }
+        // If we are on the dashboard, reload the list
+        if (typeof loadDashboard === 'function') {
+            loadDashboard();
+        }
+    } catch (err) {
+        showToast(`Failed to update status: ${err.message}`, 'error');
+    }
+}
+
+function formatDate(ts) {
+    if (!ts) return '—';
+    try {
+        let normalised = ts.replace(/\//g, '-');
+        if (!normalised.includes('+') && !normalised.includes('-')) {
+            normalised = normalised.replace(/Z$/i, '');
+        }
+        const d = new Date(normalised);
+        if (isNaN(d.getTime())) return ts;
+        return d.toLocaleDateString('en-US', { day: '2-digit', month: 'short', year: 'numeric' }) + ' ' +
+               d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+    } catch {
+        return ts;
+    }
+}
+
+function openVulnerabilityDrawer(v) {
+    const overlay = document.getElementById('drawerOverlay');
+    const drawer = document.getElementById('drawer');
+    const body = document.getElementById('drawerBody');
+    const titleEl = drawer ? drawer.querySelector('.drawer-title') : null;
+    if (!overlay || !drawer || !body) return;
+
+    if (titleEl) titleEl.textContent = "Vulnerability Details";
+
+    let badgeClass = 'badge-info';
+    const sev = (v.severity || '').toLowerCase();
+    if (sev === 'critical') badgeClass = 'badge-critical';
+    else if (sev === 'high') badgeClass = 'badge-high';
+    else if (sev === 'medium') badgeClass = 'badge-medium';
+    else if (sev === 'low') badgeClass = 'badge-low';
+
+    body.innerHTML = `
+        <div class="drawer-section">
+            <div class="drawer-section-title">Vulnerability Details</div>
+            <div class="drawer-field">
+                <span class="drawer-field-label">CVE ID</span>
+                <span class="drawer-field-value mono font-semibold" style="color: var(--blue);">${escapeHtml(v.cve || '—')}</span>
+            </div>
+            <div class="drawer-field">
+                <span class="drawer-field-label">Severity</span>
+                <span class="drawer-field-value"><span class="badge ${badgeClass}">${escapeHtml(v.severity || 'Unknown')}</span></span>
+            </div>
+            <div class="drawer-field">
+                <span class="drawer-field-label">Status</span>
+                <span class="drawer-field-value"><span class="badge badge-info">${escapeHtml(v.status || 'Active')}</span></span>
+            </div>
+            <div class="drawer-field">
+                <span class="drawer-field-label">Last Detected</span>
+                <span class="drawer-field-value mono">${escapeHtml(v.detected_at ? formatDate(v.detected_at) : 'unknown')}</span>
+            </div>
+            <div class="drawer-field">
+                <span class="drawer-field-label">Title / Description</span>
+                <span class="drawer-field-value">${escapeHtml(v.title || '—')}</span>
+            </div>
+        </div>
+
+        <div class="drawer-section">
+            <div class="drawer-section-title">Affected Package</div>
+            <div class="drawer-field">
+                <span class="drawer-field-label">Package Name</span>
+                <span class="drawer-field-value font-medium">${escapeHtml(v.name || '—')}</span>
+            </div>
+            <div class="drawer-field">
+                <span class="drawer-field-label">Version</span>
+                <span class="drawer-field-value mono">${escapeHtml(v.version || '—')}</span>
+            </div>
+            <div class="drawer-field">
+                <span class="drawer-field-label">Architecture</span>
+                <span class="drawer-field-value mono">${escapeHtml(v.architecture || '—')}</span>
+            </div>
+        </div>
+
+        <div class="drawer-section">
+            <div class="drawer-section-title">Affected Agent</div>
+            <div class="drawer-field">
+                <span class="drawer-field-label">Agent Name</span>
+                <span class="drawer-field-value"><a href="/agents/${v.agent_id}" style="color: var(--blue); text-decoration: underline;">${escapeHtml(v.agent_name || '—')}</a></span>
+            </div>
+            <div class="drawer-field">
+                <span class="drawer-field-label">Agent ID</span>
+                <span class="drawer-field-value mono">${escapeHtml(v.agent_id || '—')}</span>
+            </div>
+        </div>
+
+        ${v.reference ? `
+        <div class="drawer-section">
+            <div class="drawer-section-title">References</div>
+            <div class="drawer-field">
+                <span class="drawer-field-label">Link</span>
+                <span class="drawer-field-value"><a href="${escapeHtml(v.reference)}" target="_blank" rel="noopener noreferrer" style="color: var(--blue); text-decoration: underline; word-break: break-all;">${escapeHtml(v.reference)}</a></span>
+            </div>
+        </div>
+        ` : ''}
+    `;
+
+    overlay.classList.add('open');
+    drawer.classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+

@@ -18,6 +18,7 @@ def get_dashboard_data(limit=10, offset=0, show_infra=False):
     security_data = {}
     agents_list = []
     latest_alerts_data = {"items": [], "total": 0}
+    incidents_list = []
     
     if wazuh_service.is_connected:
         try:
@@ -42,6 +43,13 @@ def get_dashboard_data(limit=10, offset=0, show_infra=False):
             )
         except Exception as exc:
             log.warning("Failed to fetch latest alerts: %s", exc)
+
+        try:
+            from services.incident_service import incident_service
+            inc_res = incident_service.get_incidents(limit=8)
+            incidents_list = inc_res.get("items", [])
+        except Exception as exc:
+            log.warning("Failed to fetch incidents list: %s", exc)
             
     return {
         "status": status_data,
@@ -49,5 +57,6 @@ def get_dashboard_data(limit=10, offset=0, show_infra=False):
         "security": security_data,
         "agents": agents_list,
         "latest_alerts": latest_alerts_data.get("items", []),
-        "latest_alerts_total": latest_alerts_data.get("total", 0)
+        "latest_alerts_total": latest_alerts_data.get("total", 0),
+        "incidents": incidents_list
     }

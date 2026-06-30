@@ -28,6 +28,11 @@ class WazuhService:
         self.password = config.PASSWORD
         self.verify_ssl = config.VERIFY_SSL
         
+        # Wazuh Indexer (OpenSearch) connection for vulnerability queries
+        self.indexer_host = config.INDEXER_HOST.rstrip("/")
+        self.indexer_username = config.INDEXER_USERNAME
+        self.indexer_password = config.INDEXER_PASSWORD
+        
         self._token = None
         self._token_expires = 0
         self.is_connected = False
@@ -112,7 +117,7 @@ class WazuhService:
             "last_error": self.last_error,
         }
 
-    def _get(self, path, params=None, cache_key=None, cache_ttl=30):
+    def _get(self, path, params=None, cache_key=None, cache_ttl=30, ignore_404=False):
         """
         Authenticated GET request helper with caching and auto-retry on 401.
         """
@@ -156,7 +161,53 @@ class WazuhService:
                 raise ConnectionError(f"Wazuh API retry failed: {exc}") from exc
 
         if resp.status_code != 200:
+            if resp.status_code == 404 and ignore_404:
+                return {}
             raise RuntimeError(f"Wazuh API returned HTTP {resp.status_code} on {path}: {resp.text[:200]}")
+
+        data = resp.json()
+        if cache_key:
+            cache.set(cache_key, data, cache_ttl)
+        return data
+
+    # ── Wazuh Indexer (OpenSearch) Query Helper ─────────────────────
+
+    def _indexer_query(self, index, query_body, cache_key=None, cache_ttl=60):
+        """
+        Query the Wazuh Indexer (OpenSearch) using HTTP Basic Auth.
+        Used for vulnerability state data which is no longer served by
+        the Manager API in Wazuh 4.x.
+        """
+        if cache_key:
+            cached = cache.get(cache_key)
+            if cached is not None:
+                return cached
+
+        if not self.indexer_password:
+            log.warning("Wazuh Indexer password not configured — set WAZUH_INDEXER_PASSWORD in .env")
+            return {"hits": {"total": {"value": 0}, "hits": []}}
+
+        url = f"{self.indexer_host}/{index}/_search"
+        try:
+            resp = requests.post(
+                url,
+                json=query_body,
+                auth=(self.indexer_username, self.indexer_password),
+                verify=self.verify_ssl,
+                timeout=self.REQUEST_TIMEOUT,
+                headers={"Content-Type": "application/json"}
+            )
+        except Exception as exc:
+            log.error("Wazuh Indexer request failed: %s", exc)
+            return {"hits": {"total": {"value": 0}, "hits": []}}
+
+        if resp.status_code == 401:
+            log.error("Wazuh Indexer auth failed (HTTP 401) — check WAZUH_INDEXER_USERNAME/PASSWORD in .env")
+            return {"hits": {"total": {"value": 0}, "hits": []}}
+
+        if resp.status_code != 200:
+            log.error("Wazuh Indexer returned HTTP %s: %s", resp.status_code, resp.text[:300])
+            return {"hits": {"total": {"value": 0}, "hits": []}}
 
         data = resp.json()
         if cache_key:
@@ -224,22 +275,102 @@ class WazuhService:
         except Exception:
             return {}
 
-    def get_vulnerabilities(self, agent_id, offset=0, limit=50):
-        """GET /vulnerability/{agent_id}"""
+    def get_vulnerabilities(self, agent_id=None, offset=0, limit=50, severity=None):
+        """
+        Query vulnerability state from the Wazuh Indexer (OpenSearch).
+        In Wazuh 4.x, vulnerability data is stored in the Indexer under
+        the 'wazuh-states-vulnerabilities-*' index, NOT the Manager API.
+        """
         try:
-            res = self._get(
-                f"/vulnerability/{agent_id}",
-                params={"limit": limit, "offset": offset},
-                cache_key=f"vulns_{agent_id}_{offset}_{limit}",
+            # Build OpenSearch query
+            must_clauses = []
+            if agent_id:
+                must_clauses.append({"match": {"agent.id": str(agent_id)}})
+            
+            if severity:
+                if isinstance(severity, list):
+                    must_clauses.append({"terms": {"vulnerability.severity": severity}})
+                else:
+                    must_clauses.append({"match": {"vulnerability.severity": severity}})
+            
+            query = {"bool": {"must": must_clauses}} if must_clauses else {"match_all": {}}
+
+            body = {
+                "query": query,
+                "from": offset,
+                "size": limit,
+                "sort": [{"vulnerability.detected_at": {"order": "desc", "unmapped_type": "date"}}]
+            }
+
+            res = self._indexer_query(
+                "wazuh-states-vulnerabilities-*",
+                body,
+                cache_key=f"vulns_{agent_id}_{offset}_{limit}_{severity}",
                 cache_ttl=60
             )
-            return {
-                "items": res.get("data", {}).get("affected_items", []),
-                "total": res.get("data", {}).get("total_affected_items", 0)
-            }
+
+            hits = res.get("hits", {})
+            total_obj = hits.get("total", {})
+            total = total_obj.get("value", 0) if isinstance(total_obj, dict) else int(total_obj)
+
+            items = []
+            for hit in hits.get("hits", []):
+                src = hit.get("_source", {})
+                vuln = src.get("vulnerability", {})
+                agent = src.get("agent", {})
+                pkg = src.get("package", {})
+                items.append({
+                    "cve": vuln.get("id", ""),
+                    "title": vuln.get("title", "") or vuln.get("description", ""),
+                    "severity": vuln.get("severity", "Unknown"),
+                    "name": pkg.get("name", ""),
+                    "version": pkg.get("version", ""),
+                    "architecture": pkg.get("architecture", ""),
+                    "status": vuln.get("status", ""),
+                    "detected_at": vuln.get("detected_at", ""),
+                    "published_at": vuln.get("published_at", ""),
+                    "reference": vuln.get("reference", ""),
+                    "agent_id": agent.get("id", ""),
+                    "agent_name": agent.get("name", ""),
+                })
+
+            return {"items": items, "total": total}
         except Exception as exc:
             log.warning("Failed to fetch vulnerabilities for agent %s: %s", agent_id, exc)
             return {"items": [], "total": 0}
+
+    def get_vulnerabilities_summary(self):
+        """
+        Get global vulnerability summary by severity directly from indexer aggregation.
+        """
+        try:
+            body = {
+                "size": 0,
+                "aggs": {
+                    "by_severity": {
+                        "terms": {
+                            "field": "vulnerability.severity"
+                        }
+                    }
+                }
+            }
+            res = self._indexer_query(
+                "wazuh-states-vulnerabilities-*",
+                body,
+                cache_key="vulns_global_summary",
+                cache_ttl=30
+            )
+            buckets = res.get("aggregations", {}).get("by_severity", {}).get("buckets", [])
+            summary = {"critical": 0, "high": 0, "medium": 0, "low": 0}
+            for b in buckets:
+                key = str(b.get("key", "")).lower()
+                doc_count = b.get("doc_count", 0)
+                if key in summary:
+                    summary[key] = doc_count
+            return summary
+        except Exception as exc:
+            log.warning("Failed to get vulnerabilities summary via indexer: %s", exc)
+            return {"critical": 0, "high": 0, "medium": 0, "low": 0}
 
     def get_sca(self, agent_id, offset=0, limit=50):
         """GET /sca/{agent_id}"""
@@ -278,9 +409,12 @@ class WazuhService:
     def get_syscollector(self, agent_id, resource="packages", offset=0, limit=50):
         """GET /syscollector/{agent_id}/{resource}"""
         try:
+            params = {}
+            if resource not in ("hardware", "os"):
+                params = {"limit": limit, "offset": offset}
             res = self._get(
                 f"/syscollector/{agent_id}/{resource}",
-                params={"limit": limit, "offset": offset},
+                params=params,
                 cache_key=f"syscol_{agent_id}_{resource}_{offset}_{limit}",
                 cache_ttl=60
             )
@@ -323,7 +457,7 @@ class WazuhService:
             return {"status": "Unhealthy", "version": "unknown", "name": "manager"}
 
     def get_stats(self):
-        """Build a stats payload with real severity breakdown."""
+        """Build a stats payload with real severity breakdown from security alerts."""
         try:
             summary = self.get_agent_summary()
         except Exception:
@@ -341,39 +475,33 @@ class WazuhService:
         medium_count = 0
         low_count = 0
         info_count = 0
-        top_tags = []
+        top_agents = {}
+        
         try:
-            logs = self._get("/manager/logs/summary", cache_key="log_summary", cache_ttl=30)
-            log_data = logs.get("data", {}).get("affected_items", [])
-            if isinstance(log_data, list):
-                for entry in log_data:
-                    for tag_name, counts in entry.items():
-                        if isinstance(counts, dict):
-                            tag_all = counts.get("all", 0)
-                            alert_total += tag_all
-                            critical_count += counts.get("critical", 0)
-                            high_count += counts.get("error", 0)
-                            medium_count += counts.get("warning", 0)
-                            low_count += counts.get("info", 0)
-                            info_count += counts.get("debug", 0)
-                            top_tags.append({"name": tag_name, "count": tag_all})
-                top_tags.sort(key=lambda x: x["count"], reverse=True)
-                top_tags = top_tags[:5]
-            elif isinstance(log_data, dict):
-                for tag, counts in log_data.items():
-                    if isinstance(counts, dict):
-                        tag_all = counts.get("all", 0)
-                        alert_total += tag_all
-                        critical_count += counts.get("critical", 0)
-                        high_count += counts.get("error", 0)
-                        medium_count += counts.get("warning", 0)
-                        low_count += counts.get("info", 0)
-                        info_count += counts.get("debug", 0)
-                        top_tags.append({"name": tag, "count": tag_all})
-                top_tags.sort(key=lambda x: x["count"], reverse=True)
-                top_tags = top_tags[:5]
+            alerts = self._get_cached_security_alerts()
+            alert_total = len(alerts)
+            for item in alerts:
+                lvl = item.get("rule", {}).get("level", 0)
+                if lvl >= 12:
+                    critical_count += 1
+                elif lvl >= 9:
+                    high_count += 1
+                elif lvl >= 5:
+                    medium_count += 1
+                elif lvl >= 3:
+                    low_count += 1
+                else:
+                    info_count += 1
+                
+                agent_name = item.get("agent", {}).get("name", "manager")
+                top_agents[agent_name] = top_agents.get(agent_name, 0) + 1
+            
+            top_tags = [{"name": name, "count": count} for name, count in top_agents.items()]
+            top_tags.sort(key=lambda x: x["count"], reverse=True)
+            top_tags = top_tags[:5]
         except Exception as exc:
-            log.warning("Could not fetch log summary: %s", exc)
+            log.warning("Could not calculate stats from cached alerts: %s", exc)
+            top_tags = []
 
         return {
             "agents": {
@@ -400,7 +528,7 @@ class WazuhService:
 
     # ── Local archives.json SIEM Event Parsing ──────────────────────
 
-    def get_alerts(self, offset=0, limit=20, search=None, level=None, agent=None, category=None, show_infra=False):
+    def get_alerts(self, offset=0, limit=20, search=None, level=None, agent=None, category=None, show_infra=False, sysmon_event_id=None):
         """
         Reads SIEM alerts from cached archives.json.
         """
@@ -414,6 +542,10 @@ class WazuhService:
                 decoder = item.get("decoder", {}).get("name", "").lower()
                 infra_keywords = ["syscollector", "rootcheck", "indexer-connector", "wazuh-modulesd", "inventory synchronization", "evaluation started", "evaluation finished"]
                 if any(k in desc or k in groups or k in decoder for k in infra_keywords):
+                    continue
+
+            if sysmon_event_id:
+                if not item.get("sysmon") or item.get("sysmon", {}).get("event_id") != str(sysmon_event_id):
                     continue
 
             if agent:
@@ -549,6 +681,11 @@ class WazuhService:
             "failed_logins": 0,
             "successful_logins": 0,
             "locked_accounts": 0,
+            "new_users": 0,
+            "privileged_logins": 0,
+            "remote_logins": 0,
+            "failures_by_user": {},
+            "failures_by_ip": {},
             "usb_events": 0,
             "software_changes": 0,
             "malware_alerts": 0,
@@ -560,10 +697,10 @@ class WazuhService:
             stats["offline_endpoints"] = summary.get("disconnected", 0)
         except Exception:
             pass
-
+ 
         today_str = datetime.now().strftime("%Y-%m-%d")
         alerts = self._get_cached_security_alerts()
-
+ 
         for parsed in alerts:
             try:
                 ts = parsed.get("timestamp", "")
@@ -575,12 +712,38 @@ class WazuhService:
                     continue
                 
                 cat = parsed.get("category")
+                rule = parsed.get("rule", {})
+                groups = rule.get("groups", [])
+                description = rule.get("description", "").lower()
+                raw_data = parsed.get("raw", {}).get("data", {})
+                win_system = raw_data.get("win", {}).get("system", {})
+                event_id = str(win_system.get("eventID", ""))
+                
+                # Check for user creation
+                if event_id == "4720" or "user_added" in groups or "group_added" in groups or "user creation" in description:
+                    stats["new_users"] += 1
+                
+                # Check for privileged login (root/admin or event 4672 assign privilege)
+                if event_id == "4672" or (cat == "authentication" and parsed.get("auth_status") == "success" and parsed.get("username", "").lower() in ["root", "admin", "administrator", "system"]):
+                    stats["privileged_logins"] += 1
+
                 if cat == "authentication":
                     status = parsed.get("auth_status")
+                    usr = parsed.get("username", "—")
+                    src = parsed.get("src_ip", "—")
+                    
                     if status == "success":
                         stats["successful_logins"] += 1
+                        # Remote logins (RDP Logon Type 10 or sshd or has source IP that is not local loopback)
+                        logon_type = str(raw_data.get("win", {}).get("eventdata", {}).get("logonType", ""))
+                        if logon_type == "10" or "sshd" in description or (src and src not in ["—", "127.0.0.1", "::1"]):
+                            stats["remote_logins"] += 1
                     elif status == "failed":
                         stats["failed_logins"] += 1
+                        if usr and usr != "—":
+                            stats["failures_by_user"][usr] = stats["failures_by_user"].get(usr, 0) + 1
+                        if src and src != "—":
+                            stats["failures_by_ip"][src] = stats["failures_by_ip"].get(src, 0) + 1
                     elif status == "lockout":
                         stats["locked_accounts"] += 1
                 elif cat == "usb":
@@ -591,7 +754,10 @@ class WazuhService:
                     stats["malware_alerts"] += 1
             except Exception:
                 continue
-
+ 
+        # Sort and limit top failures
+        stats["failures_by_user"] = dict(sorted(stats["failures_by_user"].items(), key=lambda x: x[1], reverse=True)[:5])
+        stats["failures_by_ip"] = dict(sorted(stats["failures_by_ip"].items(), key=lambda x: x[1], reverse=True)[:5])
         return stats
 
     def get_consolidated_applications(self):
@@ -657,12 +823,12 @@ def _read_last_rule_lines(filepath, num_lines=15000):
                 parts = buffer.split(b"\n")
                 buffer = parts[0]
                 for line in reversed(parts[1:]):
-                    if b'"rule":' in line:
+                    if b'"rule":' in line or b'"win":' in line:
                         lines.append(line.decode("utf-8", errors="ignore").strip())
                         if len(lines) >= num_lines:
                             break
             
-            if len(lines) < num_lines and b'"rule":' in buffer:
+            if len(lines) < num_lines and (b'"rule":' in buffer or b'"win":' in buffer):
                 lines.append(buffer.decode("utf-8", errors="ignore").strip())
                 
         lines.reverse()
@@ -670,10 +836,72 @@ def _read_last_rule_lines(filepath, num_lines=15000):
     except Exception:
         return []
 
+def _should_suppress_sysmon(sysmon_id, sysmon_details):
+    if not sysmon_details:
+        return False
+
+    src_img = (sysmon_details.get("source_image") or sysmon_details.get("image") or "").lower()
+    tgt_img = (sysmon_details.get("target_image") or "").lower()
+    tgt_obj = (sysmon_details.get("target_object") or "").lower()
+    query_name = (sysmon_details.get("query_name") or "").lower()
+
+    # Event ID 10: Process Access
+    if sysmon_id == "10":
+        suppressed_sources = [
+            "kaspersky", "avp.exe", "nview", "wondershare", 
+            "msedgewebview2.exe", "svchost.exe", "chrome.exe", 
+            "msedge.exe", "teams.exe", "explorer.exe", "searchindexer.exe",
+            "onedrive.exe"
+        ]
+        if any(s in src_img for s in suppressed_sources):
+            return True
+        if any(s in tgt_img for s in ["conhost.exe", "explorer.exe"]):
+            if any(s in src_img for s in ["grammarly", "whatsapp", "onedrive"]):
+                return True
+
+    # Event ID 12/13/14: Registry modification noise
+    elif sysmon_id in ["12", "13", "14"]:
+        if "capabilityaccessmanager" in tgt_obj or "services\\bam" in tgt_obj:
+            return True
+        if "svchost.exe" in src_img:
+            return True
+
+    # Event ID 22: DNS query noise
+    elif sysmon_id == "22":
+        if "svchost.exe" in src_img:
+            return True
+        benign_domains = [
+            "autodesk.com", "grammarly.io", "grammarly.com", 
+            "epicgames.com", "kaspersky.com", "vivoglobal.com", 
+            "google.com", "googleapis.com", "whatsapp.net", 
+            "facebook.com", "msftconnecttest.com", "wpad"
+        ]
+        if any(d in query_name for d in benign_domains):
+            return True
+
+    return False
+
 def _normalize_security_event(raw):
+    win_data = raw.get("data", {})
+    if isinstance(win_data, dict):
+        win_data = win_data.get("win", {})
+    else:
+        win_data = {}
+
+    is_windows = isinstance(win_data, dict) and win_data
+
     rule = raw.get("rule")
     if not rule or not isinstance(rule, dict) or not rule.get("id"):
-        return None
+        if not is_windows:
+            return None
+        system = win_data.get("system", {}) if isinstance(win_data, dict) else {}
+        event_id_str = str(system.get("eventID", "")) if isinstance(system, dict) else ""
+        rule = {
+            "id": f"win_{event_id_str}" if event_id_str else "win_unknown",
+            "level": 3,
+            "description": f"Windows Event Channel Log (ID {event_id_str})" if event_id_str else "Windows Event Channel Log",
+            "groups": ["windows", "windows_eventchannel"]
+        }
 
     desc = rule.get("description", "")
     desc_lower = desc.lower()
@@ -699,13 +927,9 @@ def _normalize_security_event(raw):
     is_sysmon = False
     sysmon_id = None
     event_id = None
-    win_data = raw.get("data", {})
-    if isinstance(win_data, dict):
-        win_data = win_data.get("win", {})
-    else:
-        win_data = {}
+    sysmon_details = None
 
-    if isinstance(win_data, dict) and win_data:
+    if is_windows:
         system = win_data.get("system", {})
         if isinstance(system, dict):
             event_id = str(system.get("eventID", ""))
@@ -732,7 +956,127 @@ def _normalize_security_event(raw):
         or event_id in ["4625"]
     )
 
-    if auth_success or auth_failed or event_id in ["4624", "4625", "4672", "4740"] or any(k in desc_lower for k in ["logon", "login", "authentication", "auth", "lockout", "password"]):
+    if is_sysmon:
+        category = "system"
+        eventdata = win_data.get("eventdata", {})
+        if not isinstance(eventdata, dict):
+            eventdata = {}
+        
+        sysmon_details = {
+            "event_id": sysmon_id,
+            "image": eventdata.get("image", eventdata.get("sourceImage", "")),
+            "parent_image": eventdata.get("parentImage", ""),
+            "command_line": eventdata.get("commandLine", ""),
+            "parent_command_line": eventdata.get("parentCommandLine", ""),
+            "user": eventdata.get("user", eventdata.get("subjectUserName", "")),
+            "process_guid": eventdata.get("processGuid", ""),
+            "parent_process_guid": eventdata.get("parentProcessGuid", ""),
+            "process_id": eventdata.get("processId", ""),
+            "parent_process_id": eventdata.get("parentProcessId", ""),
+            "target_filename": eventdata.get("targetFilename", ""),
+            "target_object": eventdata.get("targetObject", ""),
+            "details": eventdata.get("details", ""),
+            "dest_ip": eventdata.get("destinationIp", ""),
+            "dest_port": eventdata.get("destinationPort", ""),
+            "src_ip": eventdata.get("sourceIp", ""),
+            "src_port": eventdata.get("sourcePort", ""),
+            "protocol": eventdata.get("protocol", ""),
+            "query_name": eventdata.get("queryName", ""),
+            "query_status": eventdata.get("queryStatus", ""),
+            "call_trace": eventdata.get("callTrace", ""),
+            "target_image": eventdata.get("targetImage", ""),
+            "source_image": eventdata.get("sourceImage", ""),
+            "mitre_technique": "",
+            "mitre_tactic": "",
+            "mitre_name": ""
+        }
+
+        if _should_suppress_sysmon(sysmon_id, sysmon_details):
+            return None
+
+        if sysmon_id == "1":
+            category = "security"
+            image_name = sysmon_details["image"] or "unknown"
+            desc = f"Process Created: {image_name}"
+            cmd = sysmon_details["command_line"].lower()
+            img = image_name.lower()
+            if "powershell" in img or "powershell" in cmd:
+                sysmon_details["mitre_technique"] = "T1059.001"
+                sysmon_details["mitre_tactic"] = "Execution"
+                sysmon_details["mitre_name"] = "PowerShell"
+            elif "certutil" in img or "certutil" in cmd:
+                sysmon_details["mitre_technique"] = "T1105"
+                sysmon_details["mitre_tactic"] = "Command and Control"
+                sysmon_details["mitre_name"] = "Ingress Tool Transfer"
+            elif "cmd.exe" in img or "cmd.exe" in cmd:
+                sysmon_details["mitre_technique"] = "T1059.003"
+                sysmon_details["mitre_tactic"] = "Execution"
+                sysmon_details["mitre_name"] = "Windows Command Shell"
+            else:
+                sysmon_details["mitre_technique"] = "T1204.002"
+                sysmon_details["mitre_tactic"] = "Execution"
+                sysmon_details["mitre_name"] = "Malicious File Execution"
+
+        elif sysmon_id == "3":
+            category = "security"
+            dest_ip = sysmon_details["dest_ip"] or "unknown"
+            dest_port = sysmon_details["dest_port"] or ""
+            desc = f"Network Connection: {dest_ip}:{dest_port}"
+            sysmon_details["mitre_technique"] = "T1071"
+            sysmon_details["mitre_tactic"] = "Command and Control"
+            sysmon_details["mitre_name"] = "Application Layer Protocol"
+
+        elif sysmon_id == "10":
+            category = "security"
+            src = sysmon_details["source_image"] or "unknown"
+            tgt = sysmon_details["target_image"] or "unknown"
+            desc = f"Process Access: {src} accessed {tgt}"
+            if "lsass" in tgt.lower() or "lsass" in src.lower():
+                sysmon_details["mitre_technique"] = "T1003.001"
+                sysmon_details["mitre_tactic"] = "Credential Access"
+                sysmon_details["mitre_name"] = "LSASS Memory"
+            else:
+                sysmon_details["mitre_technique"] = "T1055"
+                sysmon_details["mitre_tactic"] = "Defense Evasion"
+                sysmon_details["mitre_name"] = "Process Injection"
+
+        elif sysmon_id == "11":
+            category = "security"
+            filename = sysmon_details["target_filename"] or "unknown"
+            desc = f"File Created: {filename}"
+            sysmon_details["mitre_technique"] = "T1106"
+            sysmon_details["mitre_tactic"] = "Execution"
+            sysmon_details["mitre_name"] = "Native API"
+
+        elif sysmon_id in ["12", "13", "14"]:
+            category = "security"
+            target_obj = sysmon_details["target_object"] or "unknown"
+            desc = f"Registry Change: {target_obj}"
+            if "run" in target_obj.lower() or "runonce" in target_obj.lower():
+                sysmon_details["mitre_technique"] = "T1547.001"
+                sysmon_details["mitre_tactic"] = "Persistence"
+                sysmon_details["mitre_name"] = "Registry Run Keys"
+            else:
+                sysmon_details["mitre_technique"] = "T1112"
+                sysmon_details["mitre_tactic"] = "Defense Evasion"
+                sysmon_details["mitre_name"] = "Modify Registry"
+
+        elif sysmon_id == "22":
+            category = "security"
+            query = sysmon_details["query_name"] or "unknown"
+            desc = f"DNS Query: {query}"
+            sysmon_details["mitre_technique"] = "T1071.004"
+            sysmon_details["mitre_tactic"] = "Command and Control"
+            sysmon_details["mitre_name"] = "DNS"
+        else:
+            desc = f"Sysmon Event ID {sysmon_id}"
+
+        if sysmon_details.get("user"):
+            username = sysmon_details["user"]
+        if sysmon_details.get("src_ip"):
+            src_ip = sysmon_details["src_ip"]
+
+    elif auth_success or auth_failed or event_id in ["4624", "4625", "4672", "4740"] or any(k in desc_lower for k in ["logon", "login", "authentication", "auth", "lockout", "password"]):
         category = "authentication"
         if event_id:
             if event_id in ["4624", "4672"]:
@@ -813,23 +1157,6 @@ def _normalize_security_event(raw):
     elif any(k in desc_lower or k in groups for k in ["virus", "malware", "trojan", "clamav", "defender", "antivirus"]):
         category = "malware"
 
-    elif is_sysmon:
-        category = "system"
-        if sysmon_id == "1":
-            category = "security"
-            eventdata = win_data.get("eventdata", {})
-            image_name = eventdata.get("image", "unknown") if isinstance(eventdata, dict) else "unknown"
-            desc = f"Process Created: {image_name}"
-        elif sysmon_id == "3":
-            eventdata = win_data.get("eventdata", {})
-            dest_ip = eventdata.get("destinationIp", "unknown") if isinstance(eventdata, dict) else "unknown"
-            dest_port = eventdata.get("destinationPort", "") if isinstance(eventdata, dict) else ""
-            desc = f"Network Connection: {dest_ip}:{dest_port}"
-        elif sysmon_id in ["12", "13", "14"]:
-            eventdata = win_data.get("eventdata", {})
-            target_obj = eventdata.get("targetObject", "unknown") if isinstance(eventdata, dict) else "unknown"
-            desc = f"Registry Change: {target_obj}"
-
     elif "service_installation" in groups or "service_creation" in groups or any(k in desc_lower for k in ["service startup", "service created", "service installed"]) or event_id == "7045":
         category = "system"
 
@@ -888,40 +1215,55 @@ def _normalize_security_event(raw):
         "username": username,
         "src_ip": src_ip,
         "auth_status": auth_status,
+        "sysmon": sysmon_details,
         "raw": raw,
     }
 
 def _deduplicate_low_severity(alerts):
     BURST_WINDOW_SECONDS = 60
-    seen = {}
+    seen_burst = {}
+    seen_exact = set()
     result = []
 
     for event in alerts:
+        agent_id = str(event.get("agent", {}).get("id", ""))
+        ts_raw = event.get("timestamp", "")[:19]
+        cat = event.get("category", "")
+        usr = event.get("username", "")
+        src = event.get("src_ip", "")
+        desc = event.get("rule", {}).get("description", "").strip().lower()
+        rule_id = str(event.get("rule", {}).get("id", ""))
         level = event.get("rule", {}).get("level", 0)
+
+        # 1. Exact Duplicate Filter (same second, agent, user, src, status/description)
+        if cat == "authentication":
+            exact_key = (agent_id, ts_raw, cat, usr, src, event.get("auth_status"))
+        else:
+            exact_key = (agent_id, ts_raw, cat, usr, src, desc)
+            
+        if exact_key in seen_exact:
+            continue
+        seen_exact.add(exact_key)
+
+        # 2. Burst window suppression for low severity (< 7)
         if level >= 7:
             result.append(event)
             continue
 
-        rule_id  = str(event.get("rule", {}).get("id", ""))
-        agent_id = str(event.get("agent", {}).get("id", ""))
-        desc     = event.get("rule", {}).get("description", "").strip().lower()
-        ts_raw   = event.get("timestamp", "")[:19]
-
-        key = (rule_id, agent_id, desc)
-
+        burst_key = (rule_id, agent_id, desc)
         try:
             event_dt = datetime.strptime(ts_raw, "%Y-%m-%dT%H:%M:%S")
         except (ValueError, TypeError):
             result.append(event)
             continue
 
-        if key not in seen:
-            seen[key] = event_dt
+        if burst_key not in seen_burst:
+            seen_burst[burst_key] = event_dt
             result.append(event)
         else:
-            diff = abs((seen[key] - event_dt).total_seconds())
+            diff = abs((seen_burst[burst_key] - event_dt).total_seconds())
             if diff > BURST_WINDOW_SECONDS:
-                seen[key] = event_dt
+                seen_burst[burst_key] = event_dt
                 result.append(event)
 
     return result

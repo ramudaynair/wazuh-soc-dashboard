@@ -3,6 +3,17 @@
 .env.*
 !.env.example
 
+# Scratch files
+scratch/
+scratch*.py
+scratch_*.py
+
+# Local state data
+data/
+
+
+
+
 # Python
 __pycache__/
 *.pyc

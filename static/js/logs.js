@@ -1,68 +1,85 @@
 /* ═══════════════════════════════════════════════════════════════
-   agents.js — Agents list page logic
-   Paginated agents loading, status filtering, and endpoint search
+   logs.js — Logs page logic
+   Paginated alerts loading, severity filtering, and text search
    ═══════════════════════════════════════════════════════════════ */
 
 let currentPage = 1;
 let pageSize = 20;
-let totalAgents = 0;
+let totalEvents = 0;
 let searchDebounceTimer = null;
 
 document.addEventListener('DOMContentLoaded', () => {
     // Read page size config
-    const configEl = document.getElementById('agentsConfig');
+    const configEl = document.getElementById('logsConfig');
     if (configEl && configEl.dataset.pageSize) {
         pageSize = parseInt(configEl.dataset.pageSize, 10) || 20;
     }
 
     // Initialize Event Listeners
-    document.getElementById('statusFilter').addEventListener('change', () => {
+    document.getElementById('levelFilter').addEventListener('change', () => {
         currentPage = 1;
-        loadAgents();
+        loadLogs();
     });
 
     document.getElementById('searchInput').addEventListener('input', () => {
         currentPage = 1;
         clearTimeout(searchDebounceTimer);
-        searchDebounceTimer = setTimeout(loadAgents, 300);
+        searchDebounceTimer = setTimeout(loadLogs, 300);
     });
 
     document.getElementById('resetFiltersBtn').addEventListener('click', resetFilters);
     document.getElementById('prevBtn').addEventListener('click', prevPage);
     document.getElementById('nextBtn').addEventListener('click', nextPage);
 
+    // Parse URL level parameter on load
+    const params = new URLSearchParams(window.location.search);
+    const levelParam = params.get('level');
+    if (levelParam) {
+        const levelSelect = document.getElementById('levelFilter');
+        if (levelSelect) {
+            levelSelect.value = levelParam;
+        }
+    }
+
     // Initial load
-    loadAgents();
+    loadLogs();
+
+    // Auto-refresh every 30 seconds
+    if (typeof startAutoRefresh === 'function') {
+        startAutoRefresh(30, () => {
+            loadLogs();
+        });
+    }
 });
 
-async function loadAgents() {
-    const tbody = document.getElementById('agentsTbody');
+async function loadLogs() {
+    const tbody = document.getElementById('logsTbody');
     if (!tbody) return;
 
     // Show skeletons during load
     tbody.innerHTML = skeletonRows(5, 8);
 
-    const status = document.getElementById('statusFilter').value;
+    const level = document.getElementById('levelFilter').value;
     const search = document.getElementById('searchInput').value.trim();
     const offset = (currentPage - 1) * pageSize;
 
     // Build URL query params
-    let url = `/api/agents?offset=${offset}&limit=${pageSize}`;
-    if (status) url += `&status=${status}`;
+    let url = `/api/alerts?offset=${offset}&limit=${pageSize}`;
+    if (level) url += `&level=${level}`;
     if (search) url += `&search=${encodeURIComponent(search)}`;
 
     try {
         const data = await api(url);
-        const agents = data.items || [];
-        totalAgents = data.total || 0;
+        const alerts = data.items || [];
+        totalEvents = data.total || 0;
 
-        if (!agents.length) {
+        if (!alerts.length) {
             tbody.innerHTML = `
                 <tr>
                     <td colspan="5">
                         <div class="empty-state">
-                            <div class="empty-icon">🖥</div>
-                            <div class="empty-text">No monitored agents found matching current criteria</div>
+                            <div class="empty-icon">🔍</div>
+                            <div class="empty-text">No security events found matching current criteria</div>
                         </div>
                     </td>
                 </tr>`;
@@ -70,22 +87,22 @@ async function loadAgents() {
             return;
         }
 
-        tbody.innerHTML = agents.map(a => {
-            const os = a.os || {};
-            const osText = os.name ? `${os.name} ${os.version || ''} (${os.platform || '—'})` : '—';
+        tbody.innerHTML = alerts.map(a => {
+            const rule = a.rule || {};
+            const agent = a.agent || {};
+            
+            // Clean/serialise alert data for drawer onClick safely
+            const alertJson = JSON.stringify(a).replace(/'/g, "&#39;");
             
             return `
-                <tr onclick="window.location.href='/agents/${a.id}'">
-                    <td class="primary">
-                        <div style="display: flex; flex-direction: column;">
-                            <span style="font-weight: 600;">${escapeHtml(a.name || '—')}</span>
-                            <span class="mono" style="font-size: 10px; color: var(--hint)">ID: ${escapeHtml(a.id)}</span>
-                        </div>
+                <tr onclick='openDrawer(${alertJson})'>
+                    <td>${levelBadge(rule.level)}</td>
+                    <td class="primary">${escapeHtml(agent.name || 'manager')}</td>
+                    <td><span class="rule-id">${escapeHtml(String(rule.id || '—'))}</span></td>
+                    <td class="primary" style="max-width:400px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis" title="${escapeHtml(rule.description || '')}">
+                        ${escapeHtml(rule.description || '—')}
                     </td>
-                    <td class="mono">${escapeHtml(a.ip || '—')}</td>
-                    <td>${statusBadge(a.status)}</td>
-                    <td class="primary">${escapeHtml(osText)}</td>
-                    <td class="mono">${formatTime(a.lastKeepAlive)}</td>
+                    <td class="mono">${formatTime(a.timestamp)}</td>
                 </tr>`;
         }).join('');
 
@@ -96,7 +113,7 @@ async function loadAgents() {
                 <td colspan="5">
                     <div class="empty-state">
                         <div class="empty-icon">⚠️</div>
-                        <div class="empty-text">Failed to load agents: ${escapeHtml(err.message)}</div>
+                        <div class="empty-text">Failed to load logs: ${escapeHtml(err.message)}</div>
                     </div>
                 </td>
             </tr>`;
@@ -111,33 +128,37 @@ function updatePaginationUI() {
 
     if (!prevBtn || !nextBtn || !pageInfo) return;
 
-    const start = totalAgents === 0 ? 0 : (currentPage - 1) * pageSize + 1;
-    const end = Math.min(currentPage * pageSize, totalAgents);
+    const start = totalEvents === 0 ? 0 : (currentPage - 1) * pageSize + 1;
+    const end = Math.min(currentPage * pageSize, totalEvents);
 
-    pageInfo.textContent = `Showing ${start}-${end} of ${totalAgents} agents`;
+    pageInfo.textContent = `Showing ${start}-${end} of ${totalEvents} events`;
 
     prevBtn.disabled = currentPage <= 1;
-    nextBtn.disabled = end >= totalAgents;
+    nextBtn.disabled = end >= totalEvents;
 }
 
 function prevPage() {
     if (currentPage > 1) {
         currentPage--;
-        loadAgents();
+        loadLogs();
     }
 }
 
 function nextPage() {
     const end = currentPage * pageSize;
-    if (end < totalAgents) {
+    if (end < totalEvents) {
         currentPage++;
-        loadAgents();
+        loadLogs();
     }
 }
 
 function resetFilters() {
-    document.getElementById('statusFilter').value = '';
+    document.getElementById('levelFilter').value = '';
     document.getElementById('searchInput').value = '';
     currentPage = 1;
-    loadAgents();
+    loadLogs();
+}
+
+function refreshPage() {
+    loadLogs();
 }

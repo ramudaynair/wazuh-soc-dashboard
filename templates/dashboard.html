@@ -1,0 +1,326 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard — Wazuh Monitor{% endblock %}
+{% block page_title %}Dashboard{% endblock %}
+
+{% block content %}
+<div id="dashboardConfig" data-page-size="{{ page_size }}" class="hidden"></div>
+
+<!-- Offline Agent Banner -->
+<div class="offline-banner hidden" id="offlineBanner" style="margin-bottom: 20px;">
+    <span class="offline-banner-icon">⚠</span>
+    <span class="offline-banner-text" id="offlineBannerText">
+        0 Agents Offline
+        <span>Immediate attention required</span>
+    </span>
+</div>
+
+<!-- Stat Cards: Focus on attention-grabbing items -->
+<div class="stats-grid" id="statsGrid" style="margin-bottom: 25px;">
+    <!-- Active Incidents -->
+    <div class="stat-card" onclick="window.location.href='/incidents'" style="cursor: pointer; border-left: 4px solid var(--critical);">
+        <div class="stat-card-header">
+            <span class="stat-card-label">Correlated Incidents</span>
+            <div class="stat-card-icon" style="background:rgba(248,81,73,.15);color:var(--critical);display:flex;align-items:center;justify-content:center;"><i data-lucide="shield-alert" style="width:16px;height:16px;"></i></div>
+        </div>
+        <div class="stat-card-value" style="color:var(--critical)" id="cardActiveIncidents">0</div>
+        <div class="stat-card-footer">
+            <span id="cardIncidentsSub">0 unresolved</span>
+        </div>
+    </div>
+
+    <!-- Critical Alerts -->
+    <div class="stat-card" onclick="window.location.href='/logs?level=error'" style="cursor: pointer; border-left: 4px solid var(--red);">
+        <div class="stat-card-header">
+            <span class="stat-card-label">Critical Alerts (Level 12+)</span>
+            <div class="stat-card-icon" style="background:rgba(248,81,73,.15);color:var(--red);display:flex;align-items:center;justify-content:center;"><i data-lucide="alert-triangle" style="width:16px;height:16px;"></i></div>
+        </div>
+        <div class="stat-card-value" style="color:var(--red)" id="cardCriticalAlerts">0</div>
+        <div class="stat-card-footer">
+            <span id="cardCriticalSub">0 Critical alerts today</span>
+        </div>
+    </div>
+
+    <!-- Active Vulnerabilities -->
+    <div class="stat-card" onclick="window.location.href='/vulnerabilities'" style="cursor: pointer; border-left: 4px solid var(--orange);">
+        <div class="stat-card-header">
+            <span class="stat-card-label">Active Vulnerabilities</span>
+            <div class="stat-card-icon" style="background:rgba(240,136,62,.15);color:var(--orange);display:flex;align-items:center;justify-content:center;"><i data-lucide="shield" style="width:16px;height:16px;"></i></div>
+        </div>
+        <div class="stat-card-value" style="color:var(--orange)" id="cardVulnerabilities">0</div>
+        <div class="stat-card-footer">
+            <span id="cardVulnerabilitiesSub">0 Critical, 0 High</span>
+        </div>
+    </div>
+
+    <!-- Offline Endpoints -->
+    <div class="stat-card" onclick="window.location.href='/agents?status=disconnected'" style="cursor: pointer; border-left: 4px solid var(--orange);">
+        <div class="stat-card-header">
+            <span class="stat-card-label">Agents Offline</span>
+            <div class="stat-card-icon" style="background:rgba(240,136,62,.1);color:var(--orange);display:flex;align-items:center;justify-content:center;"><i data-lucide="monitor-off" style="width:16px;height:16px;"></i></div>
+        </div>
+        <div class="stat-card-value" style="color:var(--orange)" id="statOffline">0</div>
+        <div class="stat-card-footer">
+            <span id="statOfflineSub">0 Offline</span>
+        </div>
+    </div>
+
+    <!-- Online Endpoints -->
+    <div class="stat-card" onclick="window.location.href='/agents?status=active'" style="cursor: pointer;">
+        <div class="stat-card-header">
+            <span class="stat-card-label">Agents Online</span>
+            <div class="stat-card-icon" style="background:rgba(63,185,80,.1);color:var(--green);display:flex;align-items:center;justify-content:center;"><i data-lucide="monitor" style="width:16px;height:16px;"></i></div>
+        </div>
+        <div class="stat-card-value" style="color:var(--green)" id="statOnline">—</div>
+        <div class="stat-card-footer">
+            <span id="statTotalSub">0 total registered</span>
+        </div>
+    </div>
+</div>
+
+<!-- Grid Row 1: Vulnerabilities & Severity Distribution -->
+<div class="grid-2-1" style="margin-bottom: 20px;">
+    <!-- Latest Critical & High Vulnerabilities -->
+    <div class="panel" style="display: flex; flex-direction: column; justify-content: space-between; height: 100%;">
+        <div>
+            <div class="panel-head">
+                <span class="panel-title">🛡️ Latest Critical & High Vulnerabilities (CVEs)</span>
+                <span class="panel-badge" id="vulnerabilitiesCount">0 CVEs</span>
+            </div>
+            <div class="tbl-wrap" style="max-height: 380px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 100px;">Severity</th>
+                            <th style="width: 150px;">CVE ID</th>
+                            <th>Vulnerable Package</th>
+                            <th style="width: 150px;">Agent</th>
+                            <th style="width: 100px;">Status</th>
+                            <th style="width: 180px;">Last Detected</th>
+                        </tr>
+                    </thead>
+                    <tbody id="vulnerabilitiesTbody">
+                        <tr>
+                            <td colspan="6">
+                                <div class="empty-state">
+                                    <div class="empty-icon">🛡️</div>
+                                    <div class="empty-text">No active vulnerabilities found</div>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <!-- Pagination Footer -->
+        <div class="table-footer" style="border-top: 1px solid var(--border); margin-top: auto;">
+            <span id="vulnPageInfo">Showing 0-0 of 0 CVEs</span>
+            <div class="page-btns">
+                <button class="page-btn" id="vulnPrevBtn" disabled>Previous</button>
+                <button class="page-btn" id="vulnNextBtn" disabled>Next</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Severity Distribution -->
+    <div class="panel" style="display: flex; flex-direction: column; height: 100%;">
+        <div class="panel-head">
+            <span class="panel-title">📊 Severity Distribution (All Events)</span>
+        </div>
+        <div style="flex: 1; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 20px 16px;">
+            <!-- Doughnut Chart Left -->
+            <div class="chart-container" style="height: 150px; width: 150px; position: relative; flex-shrink: 0;">
+                <canvas id="severityDoughnutChart"></canvas>
+                <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none;">
+                    <span style="font-size: 22px; font-weight: 700; color: #e6edf3; display: block; line-height: 1.1;" id="sevTotalCount">0</span>
+                    <span style="display: block; font-size: 9px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px;">Events</span>
+                </div>
+            </div>
+            <!-- Severity List Right -->
+            <div style="flex: 1; display: flex; flex-direction: column; gap: 8px;">
+                <!-- Critical -->
+                <div style="display: flex; align-items: center; justify-content: space-between; font-size: 13px;">
+                    <span style="display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #f85149;"></span>
+                        Critical
+                    </span>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <span id="cntCrit" style="font-weight: 600; color: #e6edf3;">0</span>
+                        <span id="pctCrit" style="font-size: 11px; color: var(--text-muted); width: 45px; text-align: right;">(0.0%)</span>
+                    </div>
+                </div>
+                <!-- High -->
+                <div style="display: flex; align-items: center; justify-content: space-between; font-size: 13px;">
+                    <span style="display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #f0883e;"></span>
+                        High
+                    </span>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <span id="cntHigh" style="font-weight: 600; color: #e6edf3;">0</span>
+                        <span id="pctHigh" style="font-size: 11px; color: var(--text-muted); width: 45px; text-align: right;">(0.0%)</span>
+                    </div>
+                </div>
+                <!-- Medium -->
+                <div style="display: flex; align-items: center; justify-content: space-between; font-size: 13px;">
+                    <span style="display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #d29922;"></span>
+                        Medium
+                    </span>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <span id="cntMed" style="font-weight: 600; color: #e6edf3;">0</span>
+                        <span id="pctMed" style="font-size: 11px; color: var(--text-muted); width: 45px; text-align: right;">(0.0%)</span>
+                    </div>
+                </div>
+                <!-- Low -->
+                <div style="display: flex; align-items: center; justify-content: space-between; font-size: 13px;">
+                    <span style="display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #3fb950;"></span>
+                        Low
+                    </span>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <span id="cntLow" style="font-weight: 600; color: #e6edf3;">0</span>
+                        <span id="pctLow" style="font-size: 11px; color: var(--text-muted); width: 45px; text-align: right;">(0.0%)</span>
+                    </div>
+                </div>
+                <!-- Info -->
+                <div style="display: flex; align-items: center; justify-content: space-between; font-size: 13px;">
+                    <span style="display: flex; align-items: center; gap: 8px;">
+                        <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #58a6ff;"></span>
+                        Info
+                    </span>
+                    <div style="display: flex; gap: 12px; align-items: center;">
+                        <span id="cntInfo" style="font-weight: 600; color: #e6edf3;">0</span>
+                        <span id="pctInfo" style="font-size: 11px; color: var(--text-muted); width: 45px; text-align: right;">(0.0%)</span>
+                    </div>
+                </div>
+                <!-- Divider -->
+                <div style="border-top: 1px solid var(--border); margin: 6px 0 2px 0;"></div>
+                <!-- Total -->
+                <div style="display: flex; align-items: center; justify-content: space-between; font-size: 13px; font-weight: 600;">
+                    <span style="color: var(--text-muted);">Total Events</span>
+                    <span id="sevTotalLabel" style="color: #e6edf3; font-size: 14px;">0</span>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Grid Row 2: Incidents & Top Affected Hosts -->
+<div class="grid-2-1" style="margin-bottom: 20px;">
+    <!-- Active Incidents List -->
+    <div class="panel" style="display: flex; flex-direction: column; justify-content: space-between; height: 100%;">
+        <div>
+            <div class="panel-head">
+                <span class="panel-title">🛡️ Active Incidents Requiring Attention</span>
+                <span class="panel-badge" id="dashboardIncidentCount">0 incidents</span>
+            </div>
+            <div class="tbl-wrap" style="max-height: 380px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Severity</th>
+                            <th>Incident ID</th>
+                            <th>Host</th>
+                            <th>Incident Title</th>
+                            <th>Timestamp</th>
+                        </tr>
+                    </thead>
+                    <tbody id="dashboardIncidentsTbody">
+                        <tr>
+                            <td colspan="5">
+                                <div class="empty-state">
+                                    <div class="empty-icon">🛡️</div>
+                                    <div class="empty-text">No active incidents detected</div>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- Top Affected Hosts -->
+    <div class="panel" style="display: flex; flex-direction: column; height: 100%;">
+        <div class="panel-head">
+            <span class="panel-title">🔥 Top Affected Hosts</span>
+        </div>
+        <div class="chart-container" style="flex: 1; min-height: 240px; padding: 16px; display: flex; align-items: center; justify-content: center;">
+            <canvas id="topAgentsChart"></canvas>
+        </div>
+    </div>
+</div>
+
+<!-- Grid Row 3: Latest Security Detections & Agent Health -->
+<div class="grid-2-1" style="margin-bottom: 20px;">
+    <!-- Latest Security Detections -->
+    <div class="panel" style="display: flex; flex-direction: column; justify-content: space-between; height: 100%;">
+        <div>
+            <div class="panel-head" style="display: flex; align-items: center; justify-content: space-between; width: 100%;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <span class="panel-title">⚠️ Latest Security Detections</span>
+                    <span class="panel-badge" id="recentEventCount">0 alerts</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <label style="font-size: 11px; color: #8b949e; display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+                        <input type="checkbox" id="showInfraToggle" style="accent-color: var(--blue); cursor: pointer;" onchange="loadRecentEvents()">
+                        Show Low Severity & Infrastructure
+                    </label>
+                </div>
+            </div>
+            <div class="tbl-wrap" style="max-height: 380px;">
+                <table>
+                    <thead>
+                        <tr>
+                            <th style="width: 90px;">Severity</th>
+                            <th style="width: 120px;">Agent</th>
+                            <th>Event Description</th>
+                            <th style="width: 150px;">Timestamp</th>
+                        </tr>
+                    </thead>
+                    <tbody id="recentEventsTbody">
+                        <tr>
+                            <td colspan="4">
+                                <div class="empty-state">
+                                    <div class="empty-icon">🔍</div>
+                                    <div class="empty-text">No security alerts loaded</div>
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <!-- Pagination Footer -->
+        <div class="table-footer" style="border-top: 1px solid var(--border); margin-top: auto;">
+            <span id="pageInfo">Showing 0-0 of 0 events</span>
+            <div class="page-btns">
+                <button class="page-btn" id="prevBtn" disabled>Previous</button>
+                <button class="page-btn" id="nextBtn" disabled>Next</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Agent Health -->
+    <div class="panel" style="display: flex; flex-direction: column; height: 100%;">
+        <div class="panel-head">
+            <span class="panel-title">🖥️ Agent Health</span>
+            <span class="panel-badge" id="agentHealthCount">0 agents</span>
+        </div>
+        <div id="agentHealthGrid" style="flex: 1; padding: 16px; display: flex; flex-direction: column; gap: 10px;">
+            <div class="empty-state">
+                <div class="empty-icon">🖥</div>
+                <div class="empty-text">No agents found</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+    const REFRESH_INTERVAL = Number("{{ refresh_interval }}");
+</script>
+<script src="/static/js/dashboard.js"></script>
+{% endblock %}

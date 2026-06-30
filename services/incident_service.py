@@ -1,20 +1,59 @@
 """
-incident_service.py — SIEM Incident Correlation tier.
+incident_service.py — SIEM Incident Correlation tier with persistent state management.
 """
 
 import logging
+import json
+import os
 from datetime import datetime
 from services.wazuh_service import wazuh_service
 
 log = logging.getLogger("wazuh-monitor.incident")
 
+STATE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "incidents_state.json")
+
 class IncidentService:
     """Service to handle incident correlation rules and state mapping."""
     
     def __init__(self):
-        pass
+        self._ensure_state_dir()
 
-    def get_incidents(self, limit=20, offset=0):
+    def _ensure_state_dir(self):
+        os.makedirs(os.path.dirname(STATE_FILE), exist_ok=True)
+        if not os.path.exists(STATE_FILE):
+            with open(STATE_FILE, "w") as f:
+                json.dump({}, f)
+
+    def _load_states(self):
+        try:
+            if os.path.exists(STATE_FILE):
+                with open(STATE_FILE, "r") as f:
+                    return json.load(f)
+        except Exception as exc:
+            log.error("Failed to load incident states: %s", exc)
+        return {}
+
+    def _save_states(self, states):
+        try:
+            with open(STATE_FILE, "w") as f:
+                json.dump(states, f, indent=2)
+        except Exception as exc:
+            log.error("Failed to save incident states: %s", exc)
+
+    def get_incident_status(self, incident_id):
+        states = self._load_states()
+        return states.get(incident_id, "Open")
+
+    def update_incident_status(self, incident_id, status):
+        valid_statuses = ["Open", "Investigating", "Resolved", "False Positive"]
+        if status not in valid_statuses:
+            raise ValueError(f"Invalid status: {status}")
+        states = self._load_states()
+        states[incident_id] = status
+        self._save_states(states)
+        return status
+
+    def get_incidents(self, status_filter=None, limit=20, offset=0):
         """
         Fetches raw security alerts and applies correlation logic to group them into incidents,
         enriching every timeline event with the full original alert metadata.
@@ -28,6 +67,8 @@ class IncidentService:
         for item in items:
             host = item.get("agent", {}).get("name", "manager")
             by_host.setdefault(host, []).append(item)
+
+        states = self._load_states()
 
         for host, events in by_host.items():
             events_sorted = sorted(events, key=lambda x: x.get("timestamp", ""))
@@ -53,14 +94,16 @@ class IncidentService:
                     })
                 
                 timeline.sort(key=lambda x: x["timestamp"])
+                inc_id = f"INC-PRIV-{host}-{timeline[0]['timestamp'][:19].replace(':', '')}"
                 incidents.append({
-                    "id": f"INC-PRIV-{host}-{timeline[0]['timestamp'][:19].replace(':', '')}",
+                    "id": inc_id,
                     "title": "Potential Privilege Escalation",
                     "severity": "High",
                     "host": host,
                     "timeline": timeline,
                     "recommendation": "Verify administrator activity and check if the created service was authorized.",
-                    "timestamp": timeline[-1]["timestamp"]
+                    "timestamp": timeline[-1]["timestamp"],
+                    "status": states.get(inc_id, "Open")
                 })
                 continue
 
@@ -98,14 +141,16 @@ class IncidentService:
                                     "alert": sa
                                 })
 
+                        inc_id = f"INC-BF-{host}-{usr}-{timeline[0]['timestamp'][:19].replace(':', '')}"
                         incidents.append({
-                            "id": f"INC-BF-{host}-{usr}-{timeline[0]['timestamp'][:19].replace(':', '')}",
+                            "id": inc_id,
                             "title": title,
                             "severity": severity,
                             "host": host,
                             "timeline": timeline,
                             "recommendation": rec,
-                            "timestamp": timeline[-1]["timestamp"]
+                            "timestamp": timeline[-1]["timestamp"],
+                            "status": states.get(inc_id, "Open")
                         })
 
             # Rule 3: Malware activity
@@ -116,39 +161,21 @@ class IncidentService:
                     "description": m.get("rule", {}).get("description"),
                     "alert": m
                 } for m in malware_events]
+                inc_id = f"INC-MAL-{host}-{timeline[0]['timestamp'][:19].replace(':', '')}"
                 incidents.append({
-                    "id": f"INC-MAL-{host}-{timeline[0]['timestamp'][:19].replace(':', '')}",
+                    "id": inc_id,
                     "title": "Malware Detection Alert",
                     "severity": "Critical",
                     "host": host,
                     "timeline": timeline,
                     "recommendation": "Quarantine the host from the network, initiate full system scan, and review suspicious processes.",
-                    "timestamp": timeline[-1]["timestamp"]
+                    "timestamp": timeline[-1]["timestamp"],
+                    "status": states.get(inc_id, "Open")
                 })
 
-        # Rule 4: Fallback for high level events (level >= 8)
-        existing_hosts_and_times = set((inc["host"], inc["timestamp"]) for inc in incidents)
-        for item in items:
-            level = item.get("rule", {}).get("level", 0)
-            if level >= 8:
-                host = item.get("agent", {}).get("name", "manager")
-                timestamp = item.get("timestamp")
-                if (host, timestamp) not in existing_hosts_and_times:
-                    desc = item.get("rule", {}).get("description", "")
-                    severity = "Critical" if level >= 12 else "High"
-                    incidents.append({
-                        "id": f"INC-RAW-{host}-{item.get('rule', {}).get('id')}-{timestamp[:19].replace(':', '')}",
-                        "title": desc,
-                        "severity": severity,
-                        "host": host,
-                        "timeline": [{
-                            "timestamp": timestamp,
-                            "description": desc,
-                            "alert": item
-                        }],
-                        "recommendation": "Investigate the triggered signature rules and check system configurations.",
-                        "timestamp": timestamp
-                    })
+        # Apply status filtering if specified
+        if status_filter:
+            incidents = [inc for inc in incidents if inc["status"].lower() == status_filter.lower()]
 
         incidents.sort(key=lambda x: x["timestamp"], reverse=True)
         total = len(incidents)
