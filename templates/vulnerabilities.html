@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Vulnerabilities — Wazuh Monitor{% endblock %}
+{% block page_title %}Vulnerabilities & CVEs{% endblock %}
+
+{% block content %}
+<div id="vulnsConfig" data-page-size="{{ page_size }}" class="hidden"></div>
+
+<!-- Summary Card -->
+<div class="stats-grid" style="margin-bottom: 20px;">
+    <div class="stat-card" style="border-left: 4px solid var(--orange);">
+        <div class="stat-card-header">
+            <span class="stat-card-label">Active Vulnerabilities</span>
+            <div class="stat-card-icon" style="background:rgba(240,136,62,.15);color:var(--orange);display:flex;align-items:center;justify-content:center;"><i data-lucide="shield" style="width:16px;height:16px;"></i></div>
+        </div>
+        <div class="stat-card-value" style="color:var(--orange)" id="criticalVulnCount">0</div>
+        <div class="stat-card-footer">
+            <span id="highVulnSub">0 Critical, 0 High</span>
+        </div>
+    </div>
+</div>
+
+<div class="panel">
+    <!-- Filter Bar -->
+    <div class="filter-bar" style="display: flex; gap: 10px; align-items: center; margin-bottom: 15px;">
+        <input type="text" class="filter-input" id="searchInput" placeholder="Search by CVE ID, Agent, Package..." style="flex: 1;">
+        
+        <select class="filter-input" id="severityFilter" style="width: 150px; cursor: pointer;">
+            <option value="">All Severities</option>
+            <option value="critical">Critical</option>
+            <option value="high">High</option>
+            <option value="medium">Medium</option>
+            <option value="low">Low</option>
+        </select>
+
+        <button class="refresh-btn" id="resetFiltersBtn" style="padding: 6px 14px;">
+            Reset
+        </button>
+    </div>
+
+    <!-- Vulnerabilities Table Container -->
+    <div class="tbl-wrap">
+        <table>
+            <thead>
+                <tr>
+                    <th style="width: 100px;">Severity</th>
+                    <th style="width: 150px;">CVE ID</th>
+                    <th style="width: 150px;">Device/Endpoint</th>
+                    <th>Vulnerable Package</th>
+                    <th style="width: 120px;">Status</th>
+                    <th style="width: 180px;">Detected At</th>
+                </tr>
+            </thead>
+            <tbody id="vulnsTbody">
+                <tr>
+                    <td colspan="6">
+                        <div class="empty-state">
+                            <div class="empty-icon"><i data-lucide="search"></i></div>
+                            <div class="empty-text">Loading vulnerability database...</div>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination Footer -->
+    <div class="table-footer">
+        <span id="pageInfo">Showing 0-0 of 0 items</span>
+        <div class="page-btns">
+            <button class="page-btn" id="prevBtn" disabled>Previous</button>
+            <button class="page-btn" id="nextBtn" disabled>Next</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/vulnerabilities.js"></script>
+{% endblock %}

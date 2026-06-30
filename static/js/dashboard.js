@@ -5,12 +5,17 @@
 
 let timelineChart = null;
 let topAgentsChart = null;
+let severityDoughnutChart = null;
 let _lastAlerts = null;   // cache for severity breakdown
 let _lastTopSources = []; // cache for top sources
 let currentPage = 1;
 let pageSize = 10;
 let totalItems = 0;
 let lastShowInfra = null;
+
+let vulnPage = 1;
+let vulnPageSize = 8;
+let vulnTotal = 0;
 
 document.addEventListener('DOMContentLoaded', () => {
     const configEl = document.getElementById('dashboardConfig');
@@ -31,12 +36,40 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    document.getElementById('vulnPrevBtn')?.addEventListener('click', () => {
+        if (vulnPage > 1) {
+            vulnPage--;
+            loadVulnerabilities();
+        }
+    });
+    document.getElementById('vulnNextBtn')?.addEventListener('click', () => {
+        if (vulnPage * vulnPageSize < vulnTotal) {
+            vulnPage++;
+            loadVulnerabilities();
+        }
+    });
+
     loadDashboard();
-    startAutoRefresh(REFRESH_INTERVAL, loadDashboard);
+    loadVulnerabilities();
+    startAutoRefresh(REFRESH_INTERVAL, () => {
+        loadDashboard();
+        loadVulnerabilities();
+    });
 });
 
 function refreshPage() {
     loadDashboard();
+    loadVulnerabilities();
+}
+
+async function loadVulnerabilities() {
+    try {
+        const offset = (vulnPage - 1) * vulnPageSize;
+        const data = await api(`/api/vulnerabilities?limit=${vulnPageSize}&offset=${offset}&severity=Critical,High`);
+        updateVulnerabilitiesTableUI(data.items || [], data.total || 0);
+    } catch (err) {
+        console.error("Vulnerabilities load error", err);
+    }
 }
 
 async function loadDashboard() {
@@ -50,9 +83,10 @@ async function loadDashboard() {
         const offset = (currentPage - 1) * pageSize;
         const data = await api(`/api/dashboard?limit=${pageSize}&offset=${offset}&show_infra=${showInfra}`);
 
-        updateStatsUI(data.stats || {}, data.security || {});
+        updateStatsUI(data, data.security || {}, data.incidents || []);
         updateAgentHealthUI(data.agents || []);
         updateRecentEventsUI(data.latest_alerts || [], data.latest_alerts_total || 0);
+        updateIncidentsUI(data.incidents || [], data.active_incidents_count || 0);
 
         markRefreshSuccess();
     } catch (err) {
@@ -66,39 +100,33 @@ async function loadStats() { return loadDashboard(); }
 async function loadAgentHealth() { return loadDashboard(); }
 async function loadRecentEvents() { return loadDashboard(); }
 
-function updateStatsUI(data, secStats) {
-    const agents = data.agents || {};
-    const alerts = data.alerts || {};
+function updateStatsUI(data, secStats, incidents) {
+    const stats = data.stats || {};
+    const agents = stats.agents || {};
+    const alerts = stats.alerts || {};
 
-    const elTotal = document.getElementById('statTotal');
-    if (elTotal) elTotal.textContent = agents.total || 0;
     const elOnline = document.getElementById('statOnline');
     if (elOnline) elOnline.textContent = agents.active || 0;
     const elOffline = document.getElementById('statOffline');
     if (elOffline) elOffline.textContent = agents.disconnected || 0;
 
-    // Populate Security stats
-    const sumFailedLogins = document.getElementById('sumFailedLogins');
-    if (sumFailedLogins) sumFailedLogins.textContent = secStats.failed_logins || 0;
-    const sumSoftwareChanges = document.getElementById('sumSoftwareChanges');
-    if (sumSoftwareChanges) sumSoftwareChanges.textContent = secStats.software_changes || 0;
-    const sumMalwareAlerts = document.getElementById('sumMalwareAlerts');
-    if (sumMalwareAlerts) sumMalwareAlerts.textContent = secStats.malware_alerts || 0;
-    const sumOfflineEndpoints = document.getElementById('sumOfflineEndpoints');
-    if (sumOfflineEndpoints) sumOfflineEndpoints.textContent = secStats.offline_endpoints || 0;
+    const cardCriticalAlerts = document.getElementById('cardCriticalAlerts');
+    if (cardCriticalAlerts) cardCriticalAlerts.textContent = alerts.critical || 0;
 
-    const cardSecurityAlerts = document.getElementById('cardSecurityAlerts');
-    if (cardSecurityAlerts) cardSecurityAlerts.textContent = alerts.total || 0;
-    const cardFailedLogins = document.getElementById('cardFailedLogins');
-    if (cardFailedLogins) cardFailedLogins.textContent = secStats.failed_logins || 0;
-    const cardSoftwareChanges = document.getElementById('cardSoftwareChanges');
-    if (cardSoftwareChanges) cardSoftwareChanges.textContent = secStats.software_changes || 0;
-    const cardMalwareAlerts = document.getElementById('cardMalwareAlerts');
-    if (cardMalwareAlerts) cardMalwareAlerts.textContent = secStats.malware_alerts || 0;
+    const cardVulns = document.getElementById('cardVulnerabilities');
+    const cardVulnsSub = document.getElementById('cardVulnerabilitiesSub');
+    if (cardVulns && data.vulnerabilities_summary) {
+        const crit = data.vulnerabilities_summary.critical || 0;
+        const high = data.vulnerabilities_summary.high || 0;
+        cardVulns.textContent = crit + high;
+        if (cardVulnsSub) {
+            cardVulnsSub.textContent = `${crit} Critical, ${high} High`;
+        }
+    }
 
     const statTotalSub = document.getElementById('statTotalSub');
     if (statTotalSub) {
-        statTotalSub.textContent = `${agents.pending || 0} pending, ${agents.never_connected || 0} never connected`;
+        statTotalSub.textContent = `${agents.total || 0} total registered`;
     }
     const statOfflineSub = document.getElementById('statOfflineSub');
     if (statOfflineSub) {
@@ -121,7 +149,7 @@ function updateStatsUI(data, secStats) {
 
     // Cache data for charts
     _lastAlerts = alerts;
-    _lastTopSources = data.top_sources || [];
+    _lastTopSources = stats.top_sources || [];
 
     // Build severity bars & charts from real data
     updateSeverityBars(alerts);
@@ -134,22 +162,78 @@ function updateSeverityBars(alerts) {
     const low = alerts.low || 0;
     const info = alerts.info || 0;
     const total = crit + high + med + low + info || 1;
+    const absoluteTotal = crit + high + med + low + info;
 
-    document.getElementById('cntCrit').textContent = crit;
-    document.getElementById('cntHigh').textContent = high;
-    document.getElementById('cntMed').textContent = med;
-    document.getElementById('cntLow').textContent = low;
-    document.getElementById('cntInfo').textContent = info;
+    const elTotal = document.getElementById('sevTotalCount');
+    if (elTotal) elTotal.textContent = absoluteTotal.toLocaleString();
+    const elTotalLabel = document.getElementById('sevTotalLabel');
+    if (elTotalLabel) elTotalLabel.textContent = absoluteTotal.toLocaleString();
 
-    requestAnimationFrame(() => {
-        document.getElementById('barCrit').style.width = Math.round(crit / total * 100) + '%';
-        document.getElementById('barHigh').style.width = Math.round(high / total * 100) + '%';
-        document.getElementById('barMed').style.width = Math.round(med / total * 100) + '%';
-        document.getElementById('barLow').style.width = Math.round(low / total * 100) + '%';
-        document.getElementById('barInfo').style.width = Math.round(info / total * 100) + '%';
+    const elCrit = document.getElementById('cntCrit');
+    if (elCrit) elCrit.textContent = crit;
+    const elHigh = document.getElementById('cntHigh');
+    if (elHigh) elHigh.textContent = high;
+    const elMed = document.getElementById('cntMed');
+    if (elMed) elMed.textContent = med;
+    const elLow = document.getElementById('cntLow');
+    if (elLow) elLow.textContent = low;
+    const elInfo = document.getElementById('cntInfo');
+    if (elInfo) elInfo.textContent = info;
+
+    const elPctCrit = document.getElementById('pctCrit');
+    if (elPctCrit) elPctCrit.textContent = `(${((crit / total) * 100).toFixed(1)}%)`;
+    const elPctHigh = document.getElementById('pctHigh');
+    if (elPctHigh) elPctHigh.textContent = `(${((high / total) * 100).toFixed(1)}%)`;
+    const elPctMed = document.getElementById('pctMed');
+    if (elPctMed) elPctMed.textContent = `(${((med / total) * 100).toFixed(1)}%)`;
+    const elPctLow = document.getElementById('pctLow');
+    if (elPctLow) elPctLow.textContent = `(${((low / total) * 100).toFixed(1)}%)`;
+    const elPctInfo = document.getElementById('pctInfo');
+    if (elPctInfo) elPctInfo.textContent = `(${((info / total) * 100).toFixed(1)}%)`;
+
+    const ctx = document.getElementById('severityDoughnutChart');
+    if (!ctx) return;
+
+    if (severityDoughnutChart) {
+        severityDoughnutChart.destroy();
+    }
+
+    severityDoughnutChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+            labels: ['Critical', 'High', 'Medium', 'Low', 'Info'],
+            datasets: [{
+                data: [crit, high, med, low, info],
+                backgroundColor: [
+                    '#f85149', // critical
+                    '#f0883e', // high
+                    '#d29922', // medium
+                    '#3fb950', // low
+                    '#58a6ff'  // info
+                ],
+                borderWidth: 1,
+                borderColor: '#1f2937'
+            }]
+        },
+        options: {
+            cutout: '75%',
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: { display: false },
+                tooltip: {
+                    callbacks: {
+                        label: function(context) {
+                            const val = context.raw;
+                            const pct = ((val / total) * 100).toFixed(1) + '%';
+                            return ` ${context.label}: ${val} (${pct})`;
+                        }
+                    }
+                }
+            }
+        }
     });
 
-    // Update charts with real data
     updateTimelineChart(alerts);
     updateTopAgentsChart(_lastTopSources);
 }
@@ -321,13 +405,18 @@ function updateAgentHealthUI(agents) {
     grid.innerHTML = agents.map(a => {
         const st = a.status || 'never_connected';
         const cardClass = st === 'active' ? 'online' : st === 'disconnected' ? 'offline' : 'warning';
+        const statusLabel = st.charAt(0).toUpperCase() + st.slice(1).replace(/_/g, ' ');
+        const lastSeen = formatRelative(a.lastKeepAlive);
+        
         return `
-            <div class="agent-health-card ${cardClass}" onclick="window.location.href='/agents/${a.id}'">
-                <div class="agent-name">${escapeHtml(a.name || '—')}</div>
-                <div class="agent-ip">${escapeHtml(a.ip || '—')}</div>
-                <div class="agent-meta">
-                    ${statusBadge(st)}
-                    <span class="agent-last-seen">${formatRelative(a.lastKeepAlive)}</span>
+            <div class="agent-health-card ${cardClass}" onclick="window.location.href='/agents/${a.id}'" style="display: flex; flex-direction: column; gap: 4px; padding: 10px 12px; margin: 0; background: var(--panel2);">
+                <div style="font-weight: 600; font-size: 13px; color: var(--text);">${escapeHtml(a.name || '—')}</div>
+                <div style="display: flex; align-items: center; gap: 8px; font-size: 11px;">
+                    <span style="display: inline-flex; align-items: center; gap: 4px; font-weight: 600; color: ${st === 'active' ? 'var(--green)' : st === 'disconnected' ? 'var(--red)' : 'var(--yellow)'};">
+                        <span style="display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: ${st === 'active' ? 'var(--green)' : st === 'disconnected' ? 'var(--red)' : 'var(--yellow)'};"></span>
+                        ${statusLabel}
+                    </span>
+                    <span style="color: var(--hint); font-size: 10px;">Last Seen ${lastSeen}</span>
                 </div>
             </div>`;
     }).join('');
@@ -341,12 +430,12 @@ function updateRecentEventsUI(items, total) {
     const tbody = document.getElementById('recentEventsTbody');
     const badge = document.getElementById('recentEventCount');
 
-    if (badge) badge.textContent = `${totalItems} events`;
+    if (badge) badge.textContent = `${totalItems} alerts`;
 
     if (!tbody) return;
 
     if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">No recent events</div></div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">No security alerts loaded</div></div></td></tr>';
         updatePaginationUI();
         return;
     }
@@ -358,13 +447,50 @@ function updateRecentEventsUI(items, total) {
             <tr onclick='openDrawer(${JSON.stringify(a).replace(/'/g, "&#39;")})'>
                 <td>${levelBadge(rule.level)}</td>
                 <td class="primary">${escapeHtml(agent.name || 'manager')}</td>
-                <td><span class="rule-id">${escapeHtml(String(rule.id || '—'))}</span></td>
-                <td class="primary" style="max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(rule.description || '')}">${escapeHtml(rule.description || '—')}</td>
+                <td class="primary" style="max-width:400px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escapeHtml(rule.description || '')}">${escapeHtml(rule.description || '—')}</td>
                 <td class="mono">${formatTime(a.timestamp)}</td>
             </tr>`;
     }).join('');
 
     updatePaginationUI();
+}
+
+function updateIncidentsUI(incidents, activeCount) {
+    const badge = document.getElementById('dashboardIncidentCount');
+    if (badge) badge.textContent = `${activeCount} active`;
+
+    const cardIncidents = document.getElementById('cardActiveIncidents');
+    if (cardIncidents) cardIncidents.textContent = activeCount;
+
+    const cardIncidentsSub = document.getElementById('cardIncidentsSub');
+    if (cardIncidentsSub) {
+        cardIncidentsSub.textContent = `${activeCount} unresolved`;
+    }
+
+    const tbody = document.getElementById('dashboardIncidentsTbody');
+    if (!tbody) return;
+
+    if (!incidents.length) {
+        tbody.innerHTML = '<tr><td colspan="5"><div class="empty-state"><div class="empty-icon"><i data-lucide="shield-off"></i></div><div class="empty-text">No active incidents detected</div></div></td></tr>';
+        if (window.lucide) lucide.createIcons();
+        return;
+    }
+
+    tbody.innerHTML = incidents.map(inc => {
+        let sevColor = 'var(--blue)';
+        if (inc.severity.toLowerCase() === 'critical') sevColor = 'var(--critical)';
+        else if (inc.severity.toLowerCase() === 'high') sevColor = 'var(--red)';
+        else if (inc.severity.toLowerCase() === 'medium') sevColor = 'var(--orange)';
+
+        return `
+            <tr onclick="window.location.href='/incidents'">
+                <td><span class="badge" style="background:rgba(248,81,73,0.1); color:${sevColor}; border:1px solid ${sevColor};">${escapeHtml(inc.severity)}</span></td>
+                <td class="mono font-semibold" style="color:var(--blue);">${escapeHtml(inc.id)}</td>
+                <td><span class="primary">${escapeHtml(inc.host || 'manager')}</span></td>
+                <td class="primary font-medium">${escapeHtml(inc.title)}</td>
+                <td class="mono">${formatTime(inc.timestamp)}</td>
+            </tr>`;
+    }).join('');
 }
 
 function clearUIOnFailure() {
@@ -423,4 +549,58 @@ function updatePaginationUI() {
 
     prevBtn.disabled = currentPage <= 1;
     nextBtn.disabled = end >= totalItems;
+}
+
+function updateVulnerabilitiesTableUI(items, total) {
+    vulnTotal = total;
+    const badge = document.getElementById('vulnerabilitiesCount');
+    if (badge) badge.textContent = `${total} total`;
+
+    const tbody = document.getElementById('vulnerabilitiesTbody');
+    if (!tbody) return;
+
+    if (!items.length) {
+        tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">🛡️</div><div class="empty-text">No active vulnerabilities found</div></div></td></tr>';
+        updateVulnPaginationUI();
+        return;
+    }
+
+    tbody.innerHTML = items.map(v => {
+        let badgeClass = 'badge-info';
+        const sev = (v.severity || '').toLowerCase();
+        if (sev === 'critical') badgeClass = 'badge-critical';
+        else if (sev === 'high') badgeClass = 'badge-high';
+        else if (sev === 'medium') badgeClass = 'badge-medium';
+        else if (sev === 'low') badgeClass = 'badge-low';
+
+        const detectDate = v.detected_at ? formatDate(v.detected_at) : 'unknown';
+
+        return `
+            <tr onclick='openVulnerabilityDrawer(${JSON.stringify(v).replace(/'/g, "&#39;")})' style="cursor: pointer;">
+                <td><span class="badge ${badgeClass}">${escapeHtml(v.severity || 'Unknown')}</span></td>
+                <td class="mono font-semibold" style="color: var(--blue);">${escapeHtml(v.cve || '—')}</td>
+                <td class="primary font-medium" style="max-width: 250px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;" title="${escapeHtml(v.name || '')} ${escapeHtml(v.version || '')}">${escapeHtml(v.name || '—')} <span class="mono" style="font-size: 10px; color: var(--hint);">${escapeHtml(v.version || '')}</span></td>
+                <td><span class="primary">${escapeHtml(v.agent_name || 'manager')}</span></td>
+                <td><span style="font-size: 11px; color: var(--hint);">${escapeHtml(v.status || 'Active')}</span></td>
+                <td class="mono" style="font-size: 11px; color: var(--text-muted);">${escapeHtml(detectDate)}</td>
+            </tr>`;
+    }).join('');
+
+    updateVulnPaginationUI();
+}
+
+function updateVulnPaginationUI() {
+    const prevBtn = document.getElementById('vulnPrevBtn');
+    const nextBtn = document.getElementById('vulnNextBtn');
+    const pageInfo = document.getElementById('vulnPageInfo');
+
+    if (!prevBtn || !nextBtn || !pageInfo) return;
+
+    const start = vulnTotal === 0 ? 0 : (vulnPage - 1) * vulnPageSize + 1;
+    const end = Math.min(vulnPage * vulnPageSize, vulnTotal);
+
+    pageInfo.textContent = `Showing ${start}-${end} of ${vulnTotal} CVEs`;
+
+    prevBtn.disabled = vulnPage <= 1;
+    nextBtn.disabled = end >= vulnTotal;
 }
