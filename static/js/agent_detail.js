@@ -124,11 +124,12 @@ async function loadAgentAlerts() {
                 <tr>
                     <td colspan="4">
                         <div class="empty-state">
-                            <div class="empty-icon">🔍</div>
+                            <div class="empty-icon"><i data-lucide="search"></i></div>
                             <div class="empty-text">No security events found in this category</div>
                         </div>
                     </td>
                 </tr>`;
+    if (window.lucide) lucide.createIcons();
             return;
         }
 
@@ -151,11 +152,12 @@ async function loadAgentAlerts() {
             <tr>
                 <td colspan="4">
                     <div class="empty-state">
-                        <div class="empty-icon">⚠️</div>
+                        <div class="empty-icon"><i data-lucide="alert-triangle"></i></div>
                         <div class="empty-text">Failed to load events: ${escapeHtml(err.message)}</div>
                     </div>
                 </td>
             </tr>`;
+    if (window.lucide) lucide.createIcons();
         toast('Fetch Events Failed', err.message, 'error');
     }
 }
@@ -171,9 +173,10 @@ async function loadTimeline() {
         if (!alerts.length) {
             container.innerHTML = `
                 <div class="empty-state">
-                    <div class="empty-icon">📈</div>
+                    <div class="empty-icon"><i data-lucide="trending-up"></i></div>
                     <div class="empty-text">No timeline activity recorded yet</div>
                 </div>`;
+    if (window.lucide) lucide.createIcons();
             return;
         }
 
@@ -185,24 +188,24 @@ async function loadTimeline() {
 
         html += alerts.map(a => {
             let color = 'var(--blue)';
-            let icon = 'ℹ️';
+            let icon = '<i data-lucide="info" style="width:12px;height:12px;color:var(--blue);"></i>';
             
             if (a.rule.level >= 12) {
                 color = 'var(--critical)';
-                icon = '🔴';
+                icon = '<i data-lucide="alert-circle" style="width:12px;height:12px;color:var(--red);"></i>';
             } else if (a.rule.level >= 9) {
                 color = 'var(--high)';
-                icon = '🟠';
+                icon = '<i data-lucide="alert-circle" style="width:12px;height:12px;color:var(--orange);"></i>';
             } else if (a.rule.level >= 5) {
                 color = 'var(--yellow)';
-                icon = '🟡';
+                icon = '<i data-lucide="alert-triangle" style="width:12px;height:12px;color:var(--yellow);"></i>';
             }
             if (a.category === 'authentication') {
-                icon = a.auth_status === 'success' ? '🔑' : '🔒';
+                icon = a.auth_status === 'success' ? '<i data-lucide="key" style="width:12px;height:12px;color:var(--green);"></i>' : '<i data-lucide="lock" style="width:12px;height:12px;color:var(--red);"></i>';
             } else if (a.category === 'applications') {
-                icon = '📦';
+                icon = '<i data-lucide="package" style="width:12px;height:12px;color:var(--blue);"></i>';
             } else if (a.category === 'malware') {
-                icon = '💀';
+                icon = '<i data-lucide="skull" style="width:12px;height:12px;color:var(--critical);"></i>';
                 color = 'var(--critical)';
             }
 
@@ -234,6 +237,7 @@ async function loadTimeline() {
         container.innerHTML = html;
     } catch (err) {
         container.innerHTML = `<div class="empty-state"><div class="empty-text" style="color:var(--red)">Failed to load timeline: ${err.message}</div></div>`;
+    if (window.lucide) lucide.createIcons();
     }
 }
 
@@ -255,11 +259,12 @@ async function loadAgentApps() {
                 <tr>
                     <td colspan="4">
                         <div class="empty-state">
-                            <div class="empty-icon">📦</div>
+                            <div class="empty-icon"><i data-lucide="package"></i></div>
                             <div class="empty-text">No installed applications found for this agent</div>
                         </div>
                     </td>
                 </tr>`;
+    if (window.lucide) lucide.createIcons();
             return;
         }
 
@@ -276,11 +281,12 @@ async function loadAgentApps() {
             <tr>
                 <td colspan="4">
                     <div class="empty-state">
-                        <div class="empty-icon">✕</div>
+                        <div class="empty-icon"><i data-lucide="x-circle"></i></div>
                         <div class="empty-text" style="color:var(--red)">Failed to load applications</div>
                     </div>
                 </td>
             </tr>`;
+    if (window.lucide) lucide.createIcons();
     }
 }
 
@@ -377,7 +383,8 @@ async function loadExplorerHardware() {
 async function loadExplorerProcesses() {
     const tbody = document.getElementById('explorerProcessesTbody');
     const badge = document.getElementById('explorerProcessCount');
-    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-text">Loading processes...</div></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-icon"><i data-lucide="loader"></i></div><div class="empty-text">Loading processes...</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
     
     try {
         const data = await api(`/api/agents/${agentId}/explorer/processes`);
@@ -386,6 +393,7 @@ async function loadExplorerProcesses() {
         
         if (!items.length) {
             tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-text">No processes found</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
             return;
         }
         
@@ -423,6 +431,7 @@ async function loadExplorerProcesses() {
         }).join('');
     } catch (err) {
         tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state" style="color:var(--red)"><div class="empty-text">Error loading processes: ${escapeHtml(err.message)}</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
     }
 }
 
@@ -430,7 +439,8 @@ async function loadExplorerProcesses() {
 async function loadExplorerPorts() {
     const tbody = document.getElementById('explorerPortsTbody');
     const badge = document.getElementById('explorerPortsCount');
-    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-text">Loading ports...</div></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon"><i data-lucide="loader"></i></div><div class="empty-text">Loading ports...</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
     
     try {
         const data = await api(`/api/agents/${agentId}/explorer/ports`);
@@ -439,6 +449,7 @@ async function loadExplorerPorts() {
         
         if (!items.length) {
             tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-text">No open ports found</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
             return;
         }
         
@@ -462,13 +473,15 @@ async function loadExplorerPorts() {
         }).join('');
     } catch (err) {
         tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state" style="color:var(--red)"><div class="empty-text">Error loading ports: ${escapeHtml(err.message)}</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
     }
 }
 
 // 3. Network Interfaces
 async function loadExplorerNet() {
     const tbody = document.getElementById('explorerNetTbody');
-    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-text">Loading network interfaces...</div></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-icon"><i data-lucide="loader"></i></div><div class="empty-text">Loading network interfaces...</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
     
     try {
         const data = await api(`/api/agents/${agentId}/explorer/netaddr`);
@@ -476,6 +489,7 @@ async function loadExplorerNet() {
         
         if (!items.length) {
             tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-text">No interfaces found</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
             return;
         }
         
@@ -495,6 +509,7 @@ async function loadExplorerNet() {
         }).join('');
     } catch (err) {
         tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state" style="color:var(--red)"><div class="empty-text">Error loading interfaces: ${escapeHtml(err.message)}</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
     }
 }
 
@@ -502,7 +517,8 @@ async function loadExplorerNet() {
 async function loadExplorerUsers() {
     const tbody = document.getElementById('explorerUsersTbody');
     const badge = document.getElementById('explorerUsersCount');
-    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-text">Loading users...</div></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-icon"><i data-lucide="loader"></i></div><div class="empty-text">Loading users...</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
     
     try {
         const data = await api(`/api/agents/${agentId}/explorer/users`);
@@ -511,6 +527,7 @@ async function loadExplorerUsers() {
         
         if (!items.length) {
             tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state"><div class="empty-text">No users found</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
             return;
         }
         
@@ -536,5 +553,6 @@ async function loadExplorerUsers() {
         }).join('');
     } catch (err) {
         tbody.innerHTML = `<tr><td colspan="4"><div class="empty-state" style="color:var(--red)"><div class="empty-text">Error loading users: ${escapeHtml(err.message)}</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
     }
 }

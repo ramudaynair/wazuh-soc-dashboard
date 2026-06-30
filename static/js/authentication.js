@@ -135,11 +135,11 @@ async function loadAuthEvents() {
         tbody.innerHTML = items.map(a => {
             let statusBadge = '';
             if (a.auth_status === 'lockout') {
-                statusBadge = '<span class="status-badge state-offline" style="background:rgba(248,81,73,0.1); border: 1px solid var(--red); color: var(--red);">🔒 LOCKOUT</span>';
+                statusBadge = '<span class="status-badge state-offline" style="background:rgba(248,81,73,0.1); border: 1px solid var(--red); color: var(--red);"><i data-lucide="lock" style="width:10px;height:10px;"></i> LOCKOUT</span>';
             } else if (a.auth_status === 'success') {
-                statusBadge = '<span class="status-badge state-online" style="background:rgba(63,185,80,0.1); border: 1px solid var(--green); color: var(--green);">✓ SUCCESS</span>';
+                statusBadge = '<span class="status-badge state-online" style="background:rgba(63,185,80,0.1); border: 1px solid var(--green); color: var(--green);"><i data-lucide="check" style="width:10px;height:10px;"></i> SUCCESS</span>';
             } else {
-                statusBadge = '<span class="status-badge state-warning" style="background:rgba(240,136,62,0.1); border: 1px solid var(--orange); color: var(--orange);">✕ FAILED</span>';
+                statusBadge = '<span class="status-badge state-warning" style="background:rgba(240,136,62,0.1); border: 1px solid var(--orange); color: var(--orange);"><i data-lucide="x" style="width:10px;height:10px;"></i> FAILED</span>';
             }
 
             return `

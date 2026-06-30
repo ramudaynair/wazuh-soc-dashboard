@@ -437,10 +437,10 @@ function openIncidentDrawer(inc) {
 
 window.executeResponseAction = function(checkbox, actionName) {
     if (checkbox.checked) {
-        showToast(`⚡ Dispatching response action: "${actionName}" to host agent...`, 'info');
+        showToast(`Dispatching response action: "${actionName}" to host agent...`, 'info');
         checkbox.disabled = true;
         setTimeout(() => {
-            showToast(`✓ Action successful: "${actionName}" completed.`, 'success');
+            showToast(`Action successful: "${actionName}" completed.`, 'success');
             checkbox.disabled = false;
         }, 1500);
     }

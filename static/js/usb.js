@@ -78,11 +78,12 @@ async function loadUsbEvents() {
                 <tr>
                     <td colspan="5">
                         <div class="empty-state">
-                            <div class="empty-icon">🔌</div>
+                            <div class="empty-icon"><i data-lucide="usb"></i></div>
                             <div class="empty-text">No USB storage events found</div>
                         </div>
                     </td>
                 </tr>`;
+    if (window.lucide) lucide.createIcons();
             updatePagination();
             return;
         }
@@ -93,9 +94,9 @@ async function loadUsbEvents() {
             
             let typeBadge = '';
             if (isRemoved) {
-                typeBadge = '<span class="status-badge state-offline">✕ DETACHED</span>';
+                typeBadge = '<span class="status-badge state-offline"><i data-lucide="x" style="width:10px;height:10px;"></i> DETACHED</span>';
             } else {
-                typeBadge = '<span class="status-badge state-online">✓ ATTACHED</span>';
+                typeBadge = '<span class="status-badge state-online"><i data-lucide="check" style="width:10px;height:10px;"></i> ATTACHED</span>';
             }
 
             // Extract cleaner description if full log is huge
@@ -117,11 +118,12 @@ async function loadUsbEvents() {
             <tr>
                 <td colspan="5">
                     <div class="empty-state">
-                        <div class="empty-icon">✕</div>
+                        <div class="empty-icon"><i data-lucide="x-circle"></i></div>
                         <div class="empty-text" style="color:var(--red)">Failed to load USB events</div>
                     </div>
                 </td>
             </tr>`;
+    if (window.lucide) lucide.createIcons();
         throw err;
     }
 }

@@ -54,7 +54,7 @@ async function loadVulnerabilities() {
         <tr>
             <td colspan="6">
                 <div class="empty-state">
-                    <div class="empty-icon">⏳</div>
+                    <div class="empty-icon"><i data-lucide="loader"></i></div>
                     <div class="empty-text">Loading vulnerability database...</div>
                 </div>
             </td>

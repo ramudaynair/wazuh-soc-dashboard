@@ -260,7 +260,8 @@ function showLoadingState() {
     tbodies.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
-            el.innerHTML = `<tr><td colspan="10"><div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-text">Loading fresh telemetry...</div></div></td></tr>`;
+            el.innerHTML = `<tr><td colspan="10"><div class="empty-state"><div class="empty-icon"><i data-lucide="loader"></i></div><div class="empty-text">Loading fresh telemetry...</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
         }
     });
 }
@@ -271,7 +272,8 @@ function showErrorState(message) {
     tbodies.forEach(id => {
         const el = document.getElementById(id);
         if (el) {
-            el.innerHTML = `<tr><td colspan="10"><div class="empty-state" style="color: var(--red);"><div class="empty-icon">⚠️</div><div class="empty-text">${escapeHtml(displayMsg)}</div></div></td></tr>`;
+            el.innerHTML = `<tr><td colspan="10"><div class="empty-state" style="color: var(--red);"><div class="empty-icon"><i data-lucide="alert-triangle"></i></div><div class="empty-text">${escapeHtml(displayMsg)}</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
         }
     });
 }
@@ -363,7 +365,8 @@ function renderProcesses(items) {
     
     if (!items.length) {
         const msg = _noSysmonMessage || 'No process creation events found. Sysmon Event ID 1 telemetry is not flowing from agents.';
-        tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="empty-icon">📂</div><div class="empty-text">${escapeHtml(msg)}</div></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7"><div class="empty-state"><div class="empty-icon"><i data-lucide="folder-open"></i></div><div class="empty-text">${escapeHtml(msg)}</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
         return;
     }
     
@@ -397,7 +400,8 @@ function renderDns(items) {
     
     if (!items.length) {
         const msg = _noSysmonMessage || 'No DNS query events found. Sysmon Event ID 22 telemetry is not flowing from agents.';
-        tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🌐</div><div class="empty-text">${escapeHtml(msg)}</div></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon"><i data-lucide="globe"></i></div><div class="empty-text">${escapeHtml(msg)}</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
         return;
     }
     
@@ -412,6 +416,7 @@ function renderDns(items) {
             <td><span class="badge" style="background:${sys.query_status === '0' || sys.query_status === 'SUCCESS' ? 'rgba(63,185,80,0.15); color:var(--green);' : 'rgba(248,81,73,0.15); color:var(--red);'}">${sys.query_status === '0' || sys.query_status === 'SUCCESS' ? 'SUCCESS' : 'ERROR ('+sys.query_status+')'}</span></td>
             <td class="mono" style="color:var(--muted);">${sys.image ? sys.image.split('\\').pop() : '—'}</td>
         `;
+    if (window.lucide) lucide.createIcons();
         
         bindRowClick(tr, item);
         tbody.appendChild(tr);
@@ -425,7 +430,8 @@ function renderFiles(items) {
     
     if (!items.length) {
         const msg = _noSysmonMessage || 'No file creation events found. Sysmon Event ID 11 telemetry is not flowing from agents.';
-        tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">📁</div><div class="empty-text">${escapeHtml(msg)}</div></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon"><i data-lucide="folder"></i></div><div class="empty-text">${escapeHtml(msg)}</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
         return;
     }
     
@@ -440,6 +446,7 @@ function renderFiles(items) {
             <td class="mono" style="color:var(--muted);">${sys.image ? sys.image.split('\\').pop() : '—'}</td>
             <td><span class="pivot-link" onclick="pivotToLogs('user', '${sys.user}')" style="cursor:pointer; color:var(--muted);">${sys.user || '—'}</span></td>
         `;
+    if (window.lucide) lucide.createIcons();
         
         bindRowClick(tr, item);
         tbody.appendChild(tr);
@@ -453,7 +460,8 @@ function renderRegistry(items) {
     
     if (!items.length) {
         const msg = _noSysmonMessage || 'No registry change events found. Sysmon Event ID 13 telemetry is not flowing from agents.';
-        tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🧠</div><div class="empty-text">${escapeHtml(msg)}</div></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon"><i data-lucide="sliders"></i></div><div class="empty-text">${escapeHtml(msg)}</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
         return;
     }
     
@@ -468,6 +476,7 @@ function renderRegistry(items) {
             <td class="mono" style="font-size:11px; max-width:250px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${sys.details || ''}">${sys.details || '—'}</td>
             <td class="mono" style="color:var(--muted);">${sys.image ? sys.image.split('\\').pop() : '—'}</td>
         `;
+    if (window.lucide) lucide.createIcons();
         
         bindRowClick(tr, item);
         tbody.appendChild(tr);
@@ -481,7 +490,8 @@ function renderNetwork(items) {
     
     if (!items.length) {
         const msg = _noSysmonMessage || 'No network connection events found. Sysmon Event ID 3 telemetry is not flowing from agents.';
-        tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">🔌</div><div class="empty-text">${escapeHtml(msg)}</div></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6"><div class="empty-state"><div class="empty-icon"><i data-lucide="plug"></i></div><div class="empty-text">${escapeHtml(msg)}</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
         return;
     }
     
@@ -497,6 +507,7 @@ function renderNetwork(items) {
             <td class="mono"><span class="pivot-link text-blue" onclick="pivotToLogs('ip', '${sys.dest_ip}')" style="cursor:pointer; color:var(--blue);">${sys.dest_ip || '—'}:${sys.dest_port || '—'}</span></td>
             <td><span class="badge" style="background:rgba(88,166,255,0.15); color:var(--blue);">${sys.protocol || 'TCP'}</span></td>
         `;
+    if (window.lucide) lucide.createIcons();
         
         bindRowClick(tr, item);
         tbody.appendChild(tr);
@@ -510,7 +521,8 @@ function renderAccess(items) {
     
     if (!items.length) {
         const msg = _noSysmonMessage || 'No process access events found. Sysmon Event ID 10 telemetry is not flowing from agents.';
-        tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🔒</div><div class="empty-text">${escapeHtml(msg)}</div></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state"><div class="empty-icon"><i data-lucide="lock"></i></div><div class="empty-text">${escapeHtml(msg)}</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
         return;
     }
     
@@ -542,7 +554,8 @@ function renderAdvanced(items) {
     
     if (!items.length) {
         const msg = _noSysmonMessage || 'No Sysmon events found. Check that Sysmon is installed on endpoints and agents are forwarding Windows Event Logs.';
-        tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">${escapeHtml(msg)}</div></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state"><div class="empty-icon"><i data-lucide="search"></i></div><div class="empty-text">${escapeHtml(msg)}</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
         return;
     }
     
@@ -596,7 +609,8 @@ function renderProcessTree(items) {
     container.innerHTML = "";
     
     if (!items.length) {
-        container.innerHTML = `<div class="empty-state"><div class="empty-icon">🌳</div><div class="empty-text">No Process Create events (ID 1) available to build tree.</div></div>`;
+        container.innerHTML = `<div class="empty-state"><div class="empty-icon"><i data-lucide="git-branch"></i></div><div class="empty-text">No Process Create events (ID 1) available to build tree.</div></div>`;
+    if (window.lucide) lucide.createIcons();
         return;
     }
     
@@ -634,7 +648,8 @@ function renderProcessTree(items) {
     });
     
     if (!roots.length) {
-        container.innerHTML = `<div class="empty-state"><div class="empty-icon">🌳</div><div class="empty-text">Process tree loops detected, failed to establish hierarchical root.</div></div>`;
+        container.innerHTML = `<div class="empty-state"><div class="empty-icon"><i data-lucide="git-branch"></i></div><div class="empty-text">Process tree loops detected, failed to establish hierarchical root.</div></div>`;
+    if (window.lucide) lucide.createIcons();
         return;
     }
     
@@ -668,7 +683,8 @@ function renderDnsAnalytics(items) {
     grid.innerHTML = "";
     
     if (!items.length) {
-        tbody.innerHTML = `<tr><td colspan="3"><div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">No DNS queries to analyze.</div></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="3"><div class="empty-state"><div class="empty-icon"><i data-lucide="bar-chart-2"></i></div><div class="empty-text">No DNS queries to analyze.</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
         return;
     }
     
@@ -714,6 +730,7 @@ function renderDnsAnalytics(items) {
             <div class="detail-info-value" style="color:var(--red);">${failCount}</div>
         </div>
     `;
+    if (window.lucide) lucide.createIcons();
     
     // Sort domains by count desc
     const sorted = Object.values(stats).sort((a, b) => b.count - a.count);
@@ -738,7 +755,8 @@ function renderFileOperations(items) {
     grid.innerHTML = "";
     
     if (!items.length) {
-        tbody.innerHTML = `<tr><td colspan="3"><div class="empty-state"><div class="empty-icon">📊</div><div class="empty-text">No File operations found.</div></div></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="3"><div class="empty-state"><div class="empty-icon"><i data-lucide="bar-chart-2"></i></div><div class="empty-text">No File operations found.</div></div></td></tr>`;
+    if (window.lucide) lucide.createIcons();
         return;
     }
     
@@ -782,6 +800,7 @@ function renderFileOperations(items) {
             <div class="detail-info-value" style="color:var(--yellow);">${tempFiles}</div>
         </div>
     `;
+    if (window.lucide) lucide.createIcons();
     
     const sorted = Object.values(stats).sort((a, b) => b.count - a.count);
     
@@ -802,7 +821,8 @@ function renderThreatTimeline(items) {
     container.innerHTML = "";
     
     if (!items.length) {
-        container.innerHTML = `<div class="empty-state"><div class="empty-icon">📈</div><div class="empty-text">No Sysmon events to generate a timeline.</div></div>`;
+        container.innerHTML = `<div class="empty-state"><div class="empty-icon"><i data-lucide="trending-up"></i></div><div class="empty-text">No Sysmon events to generate a timeline.</div></div>`;
+    if (window.lucide) lucide.createIcons();
         return;
     }
     
@@ -815,38 +835,38 @@ function renderThreatTimeline(items) {
         div.classList.add("seq-item");
         
         let typeText = "System Action";
-        let icon = "⚙️";
+        let icon = '<i data-lucide="cpu" style="width:12px;height:12px;"></i>';
         let desc = item.rule.description;
         
         if (sys.event_id === "1") { 
-            typeText = "Process Spawned"; icon = "🚀"; 
+            typeText = "Process Spawned"; icon = '<i data-lucide="zap" style="width:12px;height:12px;"></i>'; 
             const img = sys.image ? sys.image.split('\\').pop() : '—';
             const par = sys.parent_image ? sys.parent_image.split('\\').pop() : '—';
             desc = `Process <strong>${img}</strong> created by ${par} (User: ${sys.user || '—'})`; 
         }
         else if (sys.event_id === "3") { 
-            typeText = "Network Connection Established"; icon = "🔌"; 
+            typeText = "Network Connection Established"; icon = '<i data-lucide="wifi" style="width:12px;height:12px;"></i>'; 
             const proc = sys.image ? sys.image.split('\\').pop() : '—';
             desc = `Network Connection: <strong>${proc}</strong> -> ${sys.dest_ip || '—'}:${sys.dest_port || '—'} (${sys.protocol || 'TCP'})`; 
         }
         else if (sys.event_id === "10") { 
-            typeText = "Process Memory Injection/Access"; icon = "🔒"; 
+            typeText = "Process Memory Injection/Access"; icon = '<i data-lucide="lock" style="width:12px;height:12px;"></i>'; 
             const src = sys.source_image ? sys.source_image.split('\\').pop() : '—';
             const tgt = sys.target_image ? sys.target_image.split('\\').pop() : '—';
             desc = `Process Access: <strong>${src}</strong> accessed memory of target ${tgt}`; 
         }
         else if (sys.event_id === "11") { 
-            typeText = "File Created"; icon = "📁"; 
+            typeText = "File Created"; icon = '<i data-lucide="file-plus" style="width:12px;height:12px;"></i>'; 
             const proc = sys.image ? sys.image.split('\\').pop() : '—';
             desc = `File Written: <strong>${sys.target_filename || '—'}</strong> by process ${proc}`; 
         }
         else if (sys.event_id === "13") { 
-            typeText = "Registry Modification"; icon = "🧠"; 
+            typeText = "Registry Modification"; icon = '<i data-lucide="sliders" style="width:12px;height:12px;"></i>'; 
             const proc = sys.image ? sys.image.split('\\').pop() : '—';
             desc = `Registry Value Set: <strong>${sys.target_object || '—'}</strong> by process ${proc}`; 
         }
         else if (sys.event_id === "22") { 
-            typeText = "DNS Resolution Request"; icon = "🌐"; 
+            typeText = "DNS Resolution Request"; icon = '<i data-lucide="globe" style="width:12px;height:12px;"></i>'; 
             const proc = sys.image ? sys.image.split('\\').pop() : '—';
             desc = `DNS Query: <strong>${sys.query_name || '—'}</strong> requested by process ${proc}`; 
         }
@@ -880,6 +900,7 @@ function renderThreatTimeline(items) {
                         <pre style="background:var(--surface); border:1px solid var(--border); border-radius:4px; padding:10px; overflow-x:auto; font-size:11px;"><code>${JSON.stringify(item.raw, null, 2)}</code></pre>
                     </div>
                 `;
+    if (window.lucide) lucide.createIcons();
             }
         });
         
