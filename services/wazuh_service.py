@@ -859,6 +859,17 @@ def _should_suppress_sysmon(sysmon_id, sysmon_details):
             if any(s in src_img for s in ["grammarly", "whatsapp", "onedrive"]):
                 return True
 
+    # Event ID 11: File Create — suppress known-safe applications
+    elif sysmon_id == "11":
+        safe_creators = [
+            "\\autodesk\\", "\\autocad", "accoreconole.exe",
+            "\\onedrive.exe", "\\chrome.exe", "\\msedge.exe",
+            "\\teams.exe", "\\grammarly", "\\kaspersky\\", "\\avp.exe",
+            "\\wondershare\\", "\\whatsapp.exe",
+        ]
+        if any(s in src_img for s in safe_creators):
+            return True
+
     # Event ID 12/13/14: Registry modification noise
     elif sysmon_id in ["12", "13", "14"]:
         if "capabilityaccessmanager" in tgt_obj or "services\\bam" in tgt_obj:

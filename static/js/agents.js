@@ -78,11 +78,12 @@ async function loadAgents() {
                 <tr>
                     <td colspan="5">
                         <div class="empty-state">
-                            <div class="empty-icon">🖥</div>
+                            <div class="empty-icon"><i data-lucide="monitor"></i></div>
                             <div class="empty-text">No monitored agents found matching current criteria</div>
                         </div>
                     </td>
                 </tr>`;
+    if (window.lucide) lucide.createIcons();
             updatePaginationUI();
             return;
         }
@@ -112,11 +113,12 @@ async function loadAgents() {
             <tr>
                 <td colspan="5">
                     <div class="empty-state">
-                        <div class="empty-icon">⚠️</div>
+                        <div class="empty-icon"><i data-lucide="alert-triangle"></i></div>
                         <div class="empty-text">Failed to load agents: ${escapeHtml(err.message)}</div>
                     </div>
                 </td>
             </tr>`;
+    if (window.lucide) lucide.createIcons();
         toast('Fetch Error', err.message, 'error');
     }
 }

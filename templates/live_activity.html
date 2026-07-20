@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block title %}Live Endpoint Activity — Wazuh Monitor{% endblock %}
-{% block page_title %}🔥 Live Endpoint Activity{% endblock %}
+{% block page_title %}Live Endpoint Activity{% endblock %}
 
 {% block head %}
 <style>
@@ -199,7 +199,7 @@
             <span id="liveStatusText" style="font-weight: 500;">Live Mode: On (5s)</span>
         </div>
         <button class="page-btn" id="refreshBtn" onclick="fetchTelemetry()" style="background: var(--panel);">
-            🔄 Force Refresh
+            Force Refresh
         </button>
     </div>
 </div>
@@ -217,7 +217,7 @@
 <!-- Main view card panel -->
 <div class="panel">
     <div class="panel-head">
-        <span class="panel-title" id="panelTitle">🚀 Recent Process Creation Events</span>
+        <span class="panel-title" id="panelTitle">Recent Process Creation Events</span>
         <span class="panel-badge" id="eventBadgeCount">0 events</span>
     </div>
 
@@ -237,7 +237,7 @@
                     </tr>
                 </thead>
                 <tbody id="processesTbody">
-                    <tr><td colspan="7"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Loading events...</div></div></td></tr>
+                    <tr><td colspan="7"><div class="empty-state"><div class="empty-icon"><i data-lucide="search"></i></div><div class="empty-text">Loading events...</div></div></td></tr>
                 </tbody>
             </table>
         </div>
@@ -257,7 +257,7 @@
                     </tr>
                 </thead>
                 <tbody id="dnsTbody">
-                    <tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Loading events...</div></div></td></tr>
+                    <tr><td colspan="5"><div class="empty-state"><div class="empty-icon"><i data-lucide="search"></i></div><div class="empty-text">Loading events...</div></div></td></tr>
                 </tbody>
             </table>
         </div>
@@ -277,7 +277,7 @@
                     </tr>
                 </thead>
                 <tbody id="filesTbody">
-                    <tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Loading events...</div></div></td></tr>
+                    <tr><td colspan="5"><div class="empty-state"><div class="empty-icon"><i data-lucide="search"></i></div><div class="empty-text">Loading events...</div></div></td></tr>
                 </tbody>
             </table>
         </div>
@@ -297,7 +297,7 @@
                     </tr>
                 </thead>
                 <tbody id="registryTbody">
-                    <tr><td colspan="5"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Loading events...</div></div></td></tr>
+                    <tr><td colspan="5"><div class="empty-state"><div class="empty-icon"><i data-lucide="search"></i></div><div class="empty-text">Loading events...</div></div></td></tr>
                 </tbody>
             </table>
         </div>
@@ -318,7 +318,7 @@
                     </tr>
                 </thead>
                 <tbody id="networkTbody">
-                    <tr><td colspan="6"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">Loading events...</div></div></td></tr>
+                    <tr><td colspan="6"><div class="empty-state"><div class="empty-icon"><i data-lucide="search"></i></div><div class="empty-text">Loading events...</div></div></td></tr>
                 </tbody>
             </table>
         </div>

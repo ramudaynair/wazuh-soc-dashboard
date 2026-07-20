@@ -101,11 +101,12 @@ async function loadInventory() {
             <tr>
                 <td colspan="5">
                     <div class="empty-state">
-                        <div class="empty-icon">✕</div>
+                        <div class="empty-icon"><i data-lucide="x-circle"></i></div>
                         <div class="empty-text" style="color:var(--red)">Failed to load applications inventory</div>
                     </div>
                 </td>
             </tr>`;
+    if (window.lucide) lucide.createIcons();
         throw err;
     }
 }
@@ -132,11 +133,12 @@ function renderInventory() {
             <tr>
                 <td colspan="5">
                     <div class="empty-state">
-                        <div class="empty-icon">🔍</div>
+                        <div class="empty-icon"><i data-lucide="search"></i></div>
                         <div class="empty-text">No matching applications found</div>
                     </div>
                 </td>
             </tr>`;
+    if (window.lucide) lucide.createIcons();
         updatePagination();
         return;
     }
@@ -177,11 +179,12 @@ async function loadChanges() {
                 <tr>
                     <td colspan="4">
                         <div class="empty-state">
-                            <div class="empty-icon">🔍</div>
+                            <div class="empty-icon"><i data-lucide="search"></i></div>
                             <div class="empty-text">No package modification logs found</div>
                         </div>
                     </td>
                 </tr>`;
+    if (window.lucide) lucide.createIcons();
             updatePagination();
             return;
         }
@@ -203,11 +206,12 @@ async function loadChanges() {
             <tr>
                 <td colspan="4">
                     <div class="empty-state">
-                        <div class="empty-icon">✕</div>
+                        <div class="empty-icon"><i data-lucide="x-circle"></i></div>
                         <div class="empty-text" style="color:var(--red)">Failed to load software changes</div>
                     </div>
                 </td>
             </tr>`;
+    if (window.lucide) lucide.createIcons();
         throw err;
     }
 }

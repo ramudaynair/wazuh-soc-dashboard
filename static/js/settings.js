@@ -43,9 +43,10 @@ function renderManagers(managers) {
     if (!managers.length) {
         list.innerHTML = `
             <div class="empty-state">
-                <div class="empty-icon">🖥</div>
+                <div class="empty-icon"><i data-lucide="monitor"></i></div>
                 <div class="empty-text">No manager nodes configured</div>
             </div>`;
+    if (window.lucide) lucide.createIcons();
         return;
     }
 

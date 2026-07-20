@@ -140,7 +140,8 @@ function updateStatsUI(data, secStats, incidents) {
             banner.classList.remove('hidden');
             const textEl = document.getElementById('offlineBannerText');
             if (textEl) {
-                textEl.innerHTML = `⚠ ${agents.disconnected} Agent${agents.disconnected > 1 ? 's' : ''} Offline <span>Immediate attention required</span>`;
+                textEl.innerHTML = `${agents.disconnected} Agent${agents.disconnected > 1 ? 's' : ''} Offline <span>Immediate attention required</span>`;
+    if (window.lucide) lucide.createIcons();
             }
         } else {
             banner.classList.add('hidden');
@@ -398,7 +399,7 @@ function updateAgentHealthUI(agents) {
     if (!grid) return;
 
     if (!agents.length) {
-        grid.innerHTML = '<div class="empty-state"><div class="empty-icon">🖥</div><div class="empty-text">No agents found</div></div>';
+        grid.innerHTML = '<div class="empty-state"><div class="empty-icon"><i data-lucide="monitor"></i></div><div class="empty-text">No agents found</div></div>';
         return;
     }
 
@@ -435,7 +436,7 @@ function updateRecentEventsUI(items, total) {
     if (!tbody) return;
 
     if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="4"><div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-text">No security alerts loaded</div></div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="4"><div class="empty-state"><div class="empty-icon"><i data-lucide="search"></i></div><div class="empty-text">No security alerts loaded</div></div></td></tr>';
         updatePaginationUI();
         return;
     }
@@ -514,9 +515,10 @@ function clearUIOnFailure() {
     if (grid) {
         grid.innerHTML = `
             <div class="empty-state">
-                <div class="empty-icon" style="color:var(--red)">⚠️</div>
+                <div class="empty-icon" style="color:var(--red)"><i data-lucide="alert-triangle"></i></div>
                 <div class="empty-text" style="color:var(--red)">Connection lost: unable to fetch agent inventory</div>
             </div>`;
+    if (window.lucide) lucide.createIcons();
     }
 
     const tbody = document.getElementById('recentEventsTbody');
@@ -527,11 +529,12 @@ function clearUIOnFailure() {
             <tr>
                 <td colspan="5">
                     <div class="empty-state">
-                        <div class="empty-icon" style="color:var(--red)">⚠️</div>
+                        <div class="empty-icon" style="color:var(--red)"><i data-lucide="alert-triangle"></i></div>
                         <div class="empty-text" style="color:var(--red)">Connection lost: unable to fetch security events log</div>
                     </div>
                 </td>
             </tr>`;
+    if (window.lucide) lucide.createIcons();
     }
 }
 
@@ -560,7 +563,7 @@ function updateVulnerabilitiesTableUI(items, total) {
     if (!tbody) return;
 
     if (!items.length) {
-        tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><div class="empty-icon">🛡️</div><div class="empty-text">No active vulnerabilities found</div></div></td></tr>';
+        tbody.innerHTML = '<tr><td colspan="6"><div class="empty-state"><div class="empty-icon"><i data-lucide="shield-off"></i></div><div class="empty-text">No active vulnerabilities found</div></div></td></tr>';
         updateVulnPaginationUI();
         return;
     }
